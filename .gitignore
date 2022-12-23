@@ -6,8 +6,8 @@ __pycache__/
 # C extensions
 *.so
 # paths
-.idea
-.ipynb_checkpoints
+.idea/
+.ipynb_checkpoints/
 data/
 # Distribution / packaging
 .Python
