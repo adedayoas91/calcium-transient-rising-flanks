@@ -6,4 +6,4 @@ Calcium flows into the soma of neurons thus activating the green fluorescence pr
 
 Here in this project, I will be exploring only the activations of the neurons and find meaningful structures in the data using an algorithm I have developed.
 
-This algorithm has been detailed in the
+This algorithm has been detailed in the paper ...
