@@ -1,4 +1,4 @@
-# risingFlanks
+# Rising flanks of calcium transcient
 
 This work is solely for calcium imaging data.
 
