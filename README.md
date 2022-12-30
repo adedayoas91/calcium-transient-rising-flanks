@@ -12,4 +12,4 @@ Here in this project, I will be exploring only the activations of the neurons an
 This algorithm has been detailed in the paper ...
 
 
-In other to be able to select appropriate correlation for any pair of neuron the [Classification of Scatter Plot Images Using Deep Learning](https://dergipark.org.tr/tr/download/article-file/1910064) and [ScagCNN](https://phamvanvung.github.io/publications/ScagCNN.pdf) papers will be used to identify the shape of data points in scatterplots after outliers detection algorithms have been employed to remove outliers which might be as a 
+In other to be able to select appropriate correlation for any pair of neuron the [Classification of Scatter Plot Images Using Deep Learning](https://dergipark.org.tr/tr/download/article-file/1910064) and [ScagCNN](https://phamvanvung.github.io/publications/ScagCNN.pdf) papers will be used to identify the shape of data points in scatterplots after outliers detection algorithms have been employed to remove outliers which might be as a result of artefact in data.
