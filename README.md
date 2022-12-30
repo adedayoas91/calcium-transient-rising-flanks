@@ -12,4 +12,4 @@ Here in this project, I will be exploring only the activations of the neurons an
 This algorithm has been detailed in the paper ...
 
 
-In other to be able to select appropriate correlation for any pair of neuron the following papers will be used 
+In other to be able to select appropriate correlation for any pair of neuron the [Classification of Scatter Plot Images Using Deep Learning]
