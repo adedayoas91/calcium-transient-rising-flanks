@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
 import matplotlib.animation as animation
 
-
+## The following functions are used in the Emitter - Receiver data to visualize results
 def repopulate(inf,traces,idx):
     """
     To repopulate the inferred matrix into the big matrix of all neurons in the data,
