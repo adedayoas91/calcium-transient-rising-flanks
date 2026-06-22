@@ -63,8 +63,16 @@ def simulate_events(
     spontaneous_rate: float = 0.025,
     transmission_probability: float = 0.8,
     random_state: int | None = None,
+    propagation_delay: int = 1,
 ) -> np.ndarray:
-    """Generate binary events on a directed network with known structure."""
+    """Generate binary events on a directed network with known structure.
+
+    ``propagation_delay`` is the number of frames between a source event and the
+    event it may trigger downstream (the latent causal lag). The default of 1
+    reproduces the original behaviour exactly, including the random-draw order.
+    Exposing it lets validation sweep the rise-duration-to-delay ratio, which is
+    what governs whether time-lagged Granger causality can resolve edge direction.
+    """
 
     network = np.asarray(adjacency, dtype=bool).copy()
     if network.ndim != 2 or network.shape[0] != network.shape[1]:
@@ -73,13 +81,20 @@ def simulate_events(
         raise ValueError("n_steps must be at least three")
     if not 0 <= spontaneous_rate <= 1 or not 0 <= transmission_probability <= 1:
         raise ValueError("event probabilities must lie in [0, 1]")
+    if not isinstance(propagation_delay, (int, np.integer)) or propagation_delay < 1:
+        raise ValueError("propagation_delay must be a positive integer (frames)")
+    if propagation_delay >= n_steps:
+        raise ValueError("propagation_delay must be smaller than n_steps")
     np.fill_diagonal(network, False)
     rng = np.random.default_rng(random_state)
     events = np.zeros((network.shape[0], n_steps), dtype=float)
     events[:, 0] = rng.random(network.shape[0]) < spontaneous_rate
     for time in range(1, n_steps):
         spontaneous = rng.random(network.shape[0]) < spontaneous_rate
-        incoming = network.T @ events[:, time - 1] > 0
+        if time >= propagation_delay:
+            incoming = network.T @ events[:, time - propagation_delay] > 0
+        else:
+            incoming = np.zeros(network.shape[0], dtype=bool)
         propagated = incoming & (
             rng.random(network.shape[0]) < transmission_probability
         )
