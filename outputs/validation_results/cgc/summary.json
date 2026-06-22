@@ -8,7 +8,7 @@
     "ALPHA": 0.01,
     "BETA": 0.001,
     "SIMULATION": true,
-    "N_STEPS": 3000,
+    "N_STEPS": 1000,
     "N_SEEDS": 20,
     "RISE_TAU": 5.0,
     "DECAY_TAU": 14.0,
@@ -19,38 +19,38 @@
     "TOLERANCE": 0.05
   },
   "calibration_seeds": [
-    3,
-    4,
-    5,
-    7,
-    9,
-    11,
-    12,
-    14,
-    17,
-    20
+    241,
+    243,
+    247,
+    248,
+    251,
+    252,
+    257,
+    258,
+    259,
+    260
   ],
   "evaluation_seeds": [
-    1,
-    2,
-    6,
-    8,
-    10,
-    13,
-    15,
-    16,
-    18,
-    19
+    242,
+    244,
+    245,
+    246,
+    249,
+    250,
+    253,
+    254,
+    255,
+    256
   ],
   "rise_length_frames": 7,
-  "median_rise_duration_mean_frames": 6.666666666666667,
-  "gamma_hat_mean": 0.9547268238378542,
+  "median_rise_duration_mean_frames": 6.583333333333333,
+  "gamma_hat_mean": 0.952362527018381,
   "representative_recovery": {
     "full": {
-      "precision": 0.6667,
+      "precision": 1.0,
       "recall": 1.0,
-      "fpr": 0.0769,
-      "f1": 0.8,
+      "fpr": 0.0,
+      "f1": 1.0,
       "W_IC": 1.0
     },
     "deconvolved": {
@@ -61,68 +61,68 @@
       "W_IC": 1.0
     },
     "rise": {
-      "precision": 0.8,
+      "precision": 1.0,
       "recall": 1.0,
-      "fpr": 0.0385,
-      "f1": 0.8889,
+      "fpr": 0.0,
+      "f1": 1.0,
       "W_IC": 1.0
     },
     "fall": {
-      "precision": 0.6,
-      "recall": 0.75,
-      "fpr": 0.0769,
-      "f1": 0.6667,
-      "W_IC": 1.0
+      "precision": 0.1667,
+      "recall": 0.25,
+      "fpr": 0.1923,
+      "f1": 0.2,
+      "W_IC": 0.7981
     }
   },
   "locked_recovery": {
     "fall": {
-      "precision": 0.4808,
-      "recall": 0.475,
-      "fpr": 0.06,
-      "W_IC": 0.9685
+      "precision": 0.6282,
+      "recall": 0.6486,
+      "fpr": 0.0366,
+      "W_IC": 0.2817
     },
     "rise": {
-      "precision": 0.7487,
-      "recall": 1.0,
-      "fpr": 0.0808,
-      "W_IC": 1.0
+      "precision": 0.6177,
+      "recall": 0.8057,
+      "fpr": 0.048,
+      "W_IC": 0.3028
     }
   },
   "wic_delta_by_condition": {
     "low_framerate": {
-      "rise": 1.0,
-      "fall": 1.0,
-      "delta_W_IC": 0.0
+      "rise": 0.4737,
+      "fall": 0.3138,
+      "delta_W_IC": 0.1599
     },
     "native": {
-      "rise": 1.0,
-      "fall": 0.9902,
-      "delta_W_IC": 0.0098
+      "rise": 0.2692,
+      "fall": 0.2742,
+      "delta_W_IC": -0.005
     },
     "noisy": {
-      "rise": 1.0,
-      "fall": 0.9924,
-      "delta_W_IC": 0.0076
+      "rise": 0.2758,
+      "fall": 0.1986,
+      "delta_W_IC": 0.0772
     },
     "shared_input": {
-      "rise": 1.0,
-      "fall": 1.0,
-      "delta_W_IC": 0.0
+      "rise": 0.2795,
+      "fall": 0.2618,
+      "delta_W_IC": 0.0177
     },
     "slow_decay": {
-      "rise": 1.0,
-      "fall": 0.8318,
-      "delta_W_IC": 0.1682
+      "rise": 0.3007,
+      "fall": 0.2825,
+      "delta_W_IC": 0.0183
     }
   },
   "nulls": {
-    "observed_rise_edges": 5,
-    "cyclic_shift_mean_edges": 0.0,
+    "observed_rise_edges": 4,
+    "cyclic_shift_mean_edges": 0.16666666666666666,
     "cyclic_shift_min_edges": 0,
-    "cyclic_shift_max_edges": 0,
+    "cyclic_shift_max_edges": 1,
     "reverse_time_edges": 4,
-    "falling_comparator_edges": 5,
-    "true_edges": 4
+    "falling_comparator_edges": 6,
+    "true_edges": 7
   }
 }
