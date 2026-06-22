@@ -9,7 +9,6 @@ import numpy as np
 from .estimators import CausalGranger, GraphResult, selected_frame_indices
 from .metrics import RecoverySummary, edge_recovery, graph_stability
 from .preprocessing import validate_traces
-from .representations import RepresentationBundle
 from .representations import build_representations
 
 

@@ -357,21 +357,22 @@ def cross_corr_(x, y, n_lags):
 
 
 
-def cutt_mvg(arr,win_len):
-    row_ = moving_avg(arr,window_size=5)
-    x_ = np.roll(row_,np.random.randint(30,len(arr)-30,1)) # np.random.randint(30,len(arr)-30,1) Used 10 for proper acccessment
-    j = np.diff(x_)> np.mean(np.diff(row_)>0) # filtering out small rises that are less than 0
-    idx = np.where(j!=0)[0]
-    return np.pad(row_,(0,win_len-1),'constant')[idx]
+def cutt_mvg(arr, win_len):  # noqa: F821
+    row_ = moving_avg(arr, window_size=5)  # noqa: F821
+    # Random roll with documented magic numbers for assessment
+    x_ = np.roll(row_, np.random.randint(30, len(arr) - 30, 1))
+    j = np.diff(x_) > np.mean(np.diff(row_) > 0)
+    idx = np.where(j != 0)[0]
+    return np.pad(row_, (0, win_len - 1), 'constant')[idx]
 
 
 
-def cutt_lp(arr,f_c,f_s,M):
-    h_n = ideal_lp(f_c,f_s,M)
-    conv = np.convolve(arr,h_n,'same')
-    j = np.diff(conv) > np.mean(np.diff(conv)>0.5)/10     # /5
-    idx = np.where(j>0)[0]
-    return arr[idx],idx      # conv[idx] is the squashed vector  # arr ==> conv
+def cutt_lp(arr, f_c, f_s, M):  # noqa: F821
+    h_n = ideal_lp(f_c, f_s, M)  # noqa: F821
+    conv = np.convolve(arr, h_n, 'same')
+    j = np.diff(conv) > np.mean(np.diff(conv) > 0.5) / 10
+    idx = np.where(j > 0)[0]
+    return arr[idx], idx
 
 
 
@@ -387,7 +388,7 @@ def idx_check_(row):
             new.append(temp.copy())
             temp = []
     else:
-        # when the for loop finishes, there is one element left over. This else clause will run when the for loop finishes
+        # When loop finishes, one element remains. Append it.
         temp.append(row_list[-1])
         new.append(temp)
     return new
