@@ -1,5 +1,17 @@
 # Calcium Transient Rising-Flank Pipeline
 
+## Scientific Context: Calcium Imaging and Rising Flanks
+
+This work is solely for calcium imaging data analysis.
+
+Calcium flows into the soma of neurons, activating green fluorescence protein (GFP), which then fluoresces. A key characteristic of GFP is its **very fast rise but slow fall** in fluorescence. It is essential to understand that the pumping out of calcium from the soma does not have any contribution to the causal relation between any two neurons.
+
+![Calcium inflow visualization showing GFP response with fast rise and slow fall characteristics](https://user-images.githubusercontent.com/47278559/209997772-998b1c87-c6ff-463b-9162-d960484d3e82.png)
+
+This project explores only the activations of neurons and finds meaningful structures in the data by analyzing the rising flanks of calcium transients—the rapid activation phase where causal relationships are most informative.
+
+## Overview
+
 Python implementation of the event-aware analysis pipeline specified in the
 companion manuscript. The package compares fixed-length rising and falling
 calcium-transient representations using directed structure learners and
