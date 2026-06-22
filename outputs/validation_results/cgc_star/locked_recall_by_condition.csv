@@ -1,0 +1,6 @@
+condition,fall,rise
+low_framerate,0.125,0.6
+native,0.175,0.875
+noisy,0.175,0.825
+shared_input,0.875,0.9
+slow_decay,0.225,0.825
