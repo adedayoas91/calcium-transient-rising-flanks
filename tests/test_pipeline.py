@@ -64,7 +64,7 @@ class PipelineTests(unittest.TestCase):
 
         self.assertEqual(result.config.event_mode, "physical")
         self.assertIn("full", result.scenarios["A"].cgc)
-        self.assertEqual(result.scenarios["A"].cgc["rise"].estimator, "physical_time_cgc")
+        self.assertEqual(result.scenarios["A"].cgc["rise"].estimator, "segment_aware_cgc")
 
     def test_roi_specific_parameters_follow_declared_neuron_exclusion(self) -> None:
         traces = np.array(
@@ -88,7 +88,7 @@ class PipelineTests(unittest.TestCase):
             result.scenarios["B"].representations.gamma, [0.8, 0.7, 0.9]
         )
 
-    def test_declared_segment_ids_are_rejected_until_supported_by_core(self) -> None:
+    def test_pipeline_passes_segment_ids_to_physical_event_mode(self) -> None:
         traces = np.array(
             [
                 [0.0, 1.0, 0.8, 0.0, 1.0, 0.8, 0.0, 1.0, 0.8],
@@ -99,11 +99,54 @@ class PipelineTests(unittest.TestCase):
         segments = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2])
         config = AnalysisConfig(
             max_lag=1,
+            event_mode="physical",
             smoothing_window=1,
             segment_ids_by_representation={"rise": segments, "fall": segments},
         )
 
-        with self.assertRaises(NotImplementedError):
+        result = run_pipeline(traces, sides=["L", "L", "R"], config=config)
+
+        self.assertEqual(result.scenarios["A"].cgc["rise"].estimator, "segment_aware_cgc")
+
+    def test_pipeline_can_filter_rise_candidates_before_cgc_decision(self) -> None:
+        traces = np.zeros((3, 40), dtype=float)
+        traces[0, 2:12] = np.linspace(0.1, 1.0, 10)
+        traces[1, 4:14] = np.linspace(0.1, 1.0, 10)
+        traces[2, 20:30] = np.linspace(0.1, 1.0, 10)
+        config = AnalysisConfig(
+            max_lag=3,
+            smoothing_window=1,
+            min_rise_run_samples=7,
+            rise_candidate_filter=True,
+            rise_match_max_lag=3,
+            rise_match_min_overlap_samples=6,
+            rise_match_min_overlap_fraction=0.6,
+        )
+
+        result = run_pipeline(traces, sides=["L", "L", "R"], config=config)
+        scenario = result.scenarios["A"]
+
+        self.assertIsNotNone(scenario.rise_flank_candidates)
+        candidates = scenario.rise_flank_candidates.candidate_adjacency
+        self.assertTrue(candidates[0, 1])
+        self.assertFalse(candidates[1, 0])
+        np.testing.assert_array_equal(
+            scenario.cgc["rise"].candidate_adjacency,
+            candidates,
+        )
+        self.assertFalse(np.any(scenario.cgc["rise"].adjacency[~candidates]))
+
+    def test_segment_ids_are_rejected_for_compressed_event_mode(self) -> None:
+        traces = np.ones((3, 9))
+        segments = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2])
+        config = AnalysisConfig(
+            max_lag=1,
+            event_mode="compressed",
+            smoothing_window=1,
+            segment_ids_by_representation={"rise": segments},
+        )
+
+        with self.assertRaisesRegex(NotImplementedError, "event_mode='physical'"):
             run_pipeline(traces, sides=["L", "L", "R"], config=config)
 
 

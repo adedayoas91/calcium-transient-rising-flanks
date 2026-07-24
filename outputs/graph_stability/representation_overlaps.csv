@@ -1,0 +1,14 @@
+binary,case,dataset,edge_intersection,edge_union,fish,fluo_type,jaccard,method,overlap_fraction_source,overlap_fraction_target,recording,source_edges,source_representation,subset,target_edges,target_representation,trace,trial,weighted_jaccard
+False,,hindbrain,8,79,,,0.10126582278481013,rising_flank_cgc,0.3333333333333333,0.12698412698412698,F6T07,24,fall,medial,63,rise,,,0.09861869819485858
+False,A,motoneurons,0,31,3,A,0.0,rising_flank_cgc,0.0,0.0,F3T1,11,fall,,20,rise,1,,0.0
+False,A,motoneurons,0,17,3,A,0.0,rising_flank_cgc,0.0,0.0,F3T2,4,fall,,13,rise,2,,0.0
+False,A,motoneurons,0,50,5,A,0.0,rising_flank_cgc,,0.0,F5T2,0,fall,,50,rise,2,,0.0
+False,B,motoneurons,0,31,3,B,0.0,rising_flank_cgc,0.0,0.0,F3T1,11,fall,,20,rise,1,,0.0
+False,B,motoneurons,0,17,3,B,0.0,rising_flank_cgc,0.0,0.0,F3T2,4,fall,,13,rise,2,,0.0
+False,B,motoneurons,1,44,5,B,0.022727272727272728,rising_flank_cgc,1.0,0.022727272727272728,F5T2,1,fall,,44,rise,2,,0.01374903358779382
+False,C,motoneurons,3,35,3,C,0.08571428571428572,rising_flank_cgc,0.2,0.13043478260869565,F3T1,15,fall,,23,rise,1,,0.051642814588016284
+False,C,motoneurons,0,16,3,C,0.0,rising_flank_cgc,0.0,0.0,F3T2,3,fall,,13,rise,2,,0.0
+False,C,motoneurons,1,47,5,C,0.02127659574468085,rising_flank_cgc,0.25,0.022727272727272728,F5T2,4,fall,,44,rise,2,,0.009632866661221805
+False,D,motoneurons,2,32,3,D,0.0625,rising_flank_cgc,0.1,0.14285714285714285,F3T1,20,fall,,14,rise,1,,0.024474012152239426
+False,D,motoneurons,0,9,3,D,0.0,rising_flank_cgc,0.0,0.0,F3T2,1,fall,,8,rise,2,,0.0
+False,D,motoneurons,0,23,5,D,0.0,rising_flank_cgc,0.0,0.0,F5T2,5,fall,,18,rise,2,,0.0

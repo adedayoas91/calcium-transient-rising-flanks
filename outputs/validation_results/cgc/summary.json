@@ -2,14 +2,14 @@
   "config": {
     "METHOD": "cgc",
     "METHOD_SLUG": "cgc",
-    "N_PERM": 15,
+    "N_PERM": 1000,
     "N_PASTS": 2,
     "N_LAGS": 1,
     "ALPHA": 0.01,
     "BETA": 0.001,
     "SIMULATION": true,
-    "N_STEPS": 2000,
-    "N_SEEDS": 2,
+    "N_STEPS": 3000,
+    "N_SEEDS": 20,
     "RISE_TAU": 5.0,
     "DECAY_TAU": 14.0,
     "NOISE_STD": 0.03,
@@ -20,36 +20,54 @@
     "IPSI_FRACTION": 0.65,
     "PROP_DELAY": 1
   },
-  "n_runs_outer": 1,
+  "n_runs_outer": 10,
   "calibration_seeds": [
-    1
+    1083,
+    1084,
+    1087,
+    1088,
+    1090,
+    1091,
+    1093,
+    1094,
+    1095,
+    1098
   ],
   "evaluation_seeds": [
-    2
+    1081,
+    1082,
+    1085,
+    1086,
+    1089,
+    1092,
+    1096,
+    1097,
+    1099,
+    1100
   ],
   "rise_length_frames": 7,
-  "median_rise_duration_mean_frames": 6.5,
-  "gamma_hat_mean": 0.9544409139940333,
+  "median_rise_duration_mean_frames": 6.666666666666667,
+  "gamma_hat_mean": 0.9547268238378542,
   "representative_recovery": {
     "full": {
-      "precision": 0.5,
-      "recall": 1.0,
-      "fpr": 0.1538,
-      "f1": 0.6667,
-      "W_IC": 1.0
-    },
-    "deconvolved": {
-      "precision": 0.5714,
-      "recall": 1.0,
-      "fpr": 0.1154,
-      "f1": 0.7273,
-      "W_IC": 1.0
-    },
-    "rise": {
       "precision": 0.6667,
       "recall": 1.0,
       "fpr": 0.0769,
       "f1": 0.8,
+      "W_IC": 1.0
+    },
+    "deconvolved": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "fpr": 0.0385,
+      "f1": 0.8889,
+      "W_IC": 1.0
+    },
+    "rise": {
+      "precision": 0.8,
+      "recall": 1.0,
+      "fpr": 0.0385,
+      "f1": 0.8889,
       "W_IC": 1.0
     },
     "fall": {
@@ -62,70 +80,70 @@
   },
   "locked_recovery": {
     "fall": {
-      "precision": 0.6468,
-      "recall": 0.4571,
-      "fpr": 0.0369,
-      "W_IC": 0.4151
+      "precision": 0.5374,
+      "recall": 0.508,
+      "fpr": 0.0459,
+      "W_IC": 0.4413
     },
     "rise": {
-      "precision": 0.6262,
-      "recall": 0.9143,
-      "fpr": 0.0615,
-      "W_IC": 0.3916
+      "precision": 0.6591,
+      "recall": 0.996,
+      "fpr": 0.0886,
+      "W_IC": 0.4032
     }
   },
   "paired_rise_vs_fall": {
     "low_framerate": {
-      "mean_rise_minus_fall": 0.2857,
-      "n_runs": 1,
-      "p_value": 1.0
+      "mean_rise_minus_fall": 0.1839,
+      "n_runs": 10,
+      "p_value": 0.002
     },
     "native": {
-      "mean_rise_minus_fall": 0.7143,
-      "n_runs": 1,
-      "p_value": 1.0
+      "mean_rise_minus_fall": 0.4065,
+      "n_runs": 10,
+      "p_value": 0.002
     },
     "noisy": {
-      "mean_rise_minus_fall": 0.2857,
-      "n_runs": 1,
-      "p_value": 1.0
+      "mean_rise_minus_fall": 0.4291,
+      "n_runs": 10,
+      "p_value": 0.002
     },
     "shared_input": {
-      "mean_rise_minus_fall": 0.4286,
-      "n_runs": 1,
-      "p_value": 1.0
+      "mean_rise_minus_fall": 0.7418,
+      "n_runs": 10,
+      "p_value": 0.002
     },
     "slow_decay": {
-      "mean_rise_minus_fall": 0.5714,
-      "n_runs": 1,
-      "p_value": 1.0
+      "mean_rise_minus_fall": 0.5624,
+      "n_runs": 10,
+      "p_value": 0.002
     }
   },
   "wic_delta_by_condition": {
     "low_framerate": {
-      "rise": 0.4547,
-      "fall": 0.4207,
-      "delta_W_IC": 0.034
+      "rise": 0.4445,
+      "fall": 0.4506,
+      "delta_W_IC": -0.0061
     },
     "native": {
-      "rise": 0.3956,
-      "fall": 0.4102,
-      "delta_W_IC": -0.0146
+      "rise": 0.4019,
+      "fall": 0.4591,
+      "delta_W_IC": -0.0572
     },
     "noisy": {
-      "rise": 0.391,
-      "fall": 0.3882,
-      "delta_W_IC": 0.0027
+      "rise": 0.4209,
+      "fall": 0.4921,
+      "delta_W_IC": -0.0712
     },
     "shared_input": {
-      "rise": 0.4908,
-      "fall": 0.3511,
-      "delta_W_IC": 0.1397
+      "rise": 0.3996,
+      "fall": 0.3869,
+      "delta_W_IC": 0.0127
     },
     "slow_decay": {
-      "rise": 0.3849,
-      "fall": 0.4343,
-      "delta_W_IC": -0.0494
+      "rise": 0.4133,
+      "fall": 0.5474,
+      "delta_W_IC": -0.1341
     }
   },
   "nulls": {
@@ -135,12 +153,12 @@
     "reverse_time_recall": 0.0,
     "reverse_time_orientation": 0.0,
     "falling_comparator_recall": 0.75,
-    "observed_rise_edges": 5,
-    "cyclic_shift_mean_edges": 0.5,
+    "observed_rise_edges": 4,
+    "cyclic_shift_mean_edges": 0.0,
     "cyclic_shift_min_edges": 0,
-    "cyclic_shift_max_edges": 1,
+    "cyclic_shift_max_edges": 0,
     "reverse_time_edges": 5,
-    "falling_comparator_edges": 6,
+    "falling_comparator_edges": 5,
     "true_edges": 4
   }
 }

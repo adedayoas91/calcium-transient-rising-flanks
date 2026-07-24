@@ -3,14 +3,96 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 
 import numpy as np
 
-from .estimators import CausalGranger, GraphResult, selected_frame_indices
+from .estimators import (
+    CausalisedGC,
+    GraphResult,
+    RiseFlankCandidateResult,
+    selected_frame_indices,
+)
 from .metrics import RecoverySummary, edge_recovery, graph_stability
 from .preprocessing import validate_traces
 from .representations import RepresentationBundle
 from .representations import build_representations
+
+
+@dataclass(frozen=True)
+class SyntheticEpisode:
+    """One rise/fall episode in an episodic dynamic simulation."""
+
+    rise_start: int
+    rise_stop: int
+    fall_start: int
+    fall_stop: int
+    adjacency: np.ndarray
+    active_nodes: np.ndarray | None = None
+
+    @property
+    def rise_length(self) -> int:
+        return self.rise_stop - self.rise_start
+
+    @property
+    def fall_length(self) -> int:
+        return self.fall_stop - self.fall_start
+
+    @property
+    def node_count(self) -> int:
+        if self.active_nodes is None:
+            return int(self.adjacency.shape[0])
+        return int(np.count_nonzero(self.active_nodes))
+
+    @property
+    def edge_count(self) -> int:
+        return int(np.count_nonzero(self.adjacency))
+
+
+@dataclass(frozen=True)
+class DynamicSimulationConfig:
+    """Controls for simulations where only rise phases carry causal propagation.
+
+    ``rise_waveform_length`` spreads each rise-phase onset over a finite number
+    of samples in the calcium drive. A value of 1 preserves impulse-like
+    innovations; larger values create slower, inspectable rising flanks.
+
+    ``fall_state_mode="stochastic_independent"`` resets each fall to an
+    ROI-local stochastic state before passive decay, making the fall segment a
+    stricter graph-independent negative control. The reset is capped by
+    ``fall_initial_ceiling_fraction`` of the preceding rise endpoint to avoid
+    non-calcium-like upward jumps at the rise/fall boundary.
+
+    Dynamic rise graphs are event specific. When ``adjacency_sequence`` is
+    supplied, episode ``k`` uses the corresponding user-declared matrix
+    ``A_k``. Otherwise the base adjacency is treated as a stable backbone and
+    each episode samples edge dropout/addition and optional source-neuron
+    de-recruitment/recruitment around that backbone. The dataset-level
+    adjacency is the logical OR over the episode matrices.
+    """
+
+    n_episodes: int = 5
+    min_rise_length: int = 20
+    max_rise_length: int = 35
+    rise_waveform_length: int = 1
+    fall_to_rise_ratio_min: float = 2.1
+    fall_to_rise_ratio_max: float = 3.5
+    propagation_delay: int = 1
+    initial_activation_probability: float = 0.35
+    edge_dropout_probability: float = 0.2
+    edge_addition_probability: float = 0.0
+    source_dropout_probability: float = 0.0
+    source_recruitment_probability: float = 0.0
+    source_recruitment_edge_probability: float = 0.25
+    fall_noise_rate: float = 0.03
+    fall_noise_scale: float = 0.02
+    fall_state_mode: str = "stochastic_independent"
+    fall_initial_scale: float = 1.0
+    fall_initial_ceiling_fraction: float = 1.0
+    rise_gain: float = 1.0
+    gamma_fall: float | np.ndarray | None = None
+    adjacency_sequence: tuple[np.ndarray, ...] | None = None
+    active_node_sequence: tuple[np.ndarray, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -19,6 +101,34 @@ class SyntheticDataset:
     events: np.ndarray
     calcium: np.ndarray
     fluorescence: np.ndarray
+    phase_labels: np.ndarray | None = None
+    episodes: tuple[SyntheticEpisode, ...] = ()
+    propagated_events: np.ndarray | None = None
+    rise_adjacencies: tuple[np.ndarray, ...] = ()
+    edge_presence_counts: np.ndarray | None = None
+    edge_prevalence: np.ndarray | None = None
+    node_presence_counts: np.ndarray | None = None
+    node_prevalence: np.ndarray | None = None
+
+    @property
+    def union_adjacency(self) -> np.ndarray:
+        return np.asarray(self.adjacency, dtype=bool).copy()
+
+    @property
+    def episode_adjacencies(self) -> tuple[np.ndarray, ...]:
+        """Return the event-specific adjacency matrix used for each rise."""
+
+        if self.rise_adjacencies:
+            return tuple(graph.copy() for graph in self.rise_adjacencies)
+        return tuple(episode.adjacency.copy() for episode in self.episodes)
+
+    @property
+    def edge_counts(self) -> np.ndarray | None:
+        """Alias for edge presence counts across dynamic rise graphs."""
+
+        if self.edge_presence_counts is None:
+            return None
+        return self.edge_presence_counts.copy()
 
 
 @dataclass(frozen=True)
@@ -55,6 +165,8 @@ class RepresentationValidation:
 
     graphs: dict[str, GraphResult]
     recovery: dict[str, RecoverySummary]
+    truth: dict[str, np.ndarray]
+    rise_flank_candidates: RiseFlankCandidateResult | None = None
 
 
 def simulate_events(
@@ -129,6 +241,376 @@ def calcium_observation_model(
     return calcium, calcium + shared + noise
 
 
+def _decay_values(gamma: float | np.ndarray, n_rois: int, name: str) -> np.ndarray:
+    decay = np.asarray(gamma, dtype=float)
+    if decay.ndim == 0:
+        decay = np.full(n_rois, float(decay))
+    if decay.shape != (n_rois,) or np.any((decay < 0) | (decay >= 1)):
+        raise ValueError(f"{name} must provide values in [0, 1) for each ROI")
+    return decay
+
+
+def _probability(value: float, name: str) -> None:
+    if not 0 <= value <= 1:
+        raise ValueError(f"{name} must lie in [0, 1]")
+
+
+def _minimum_fall_length(config: DynamicSimulationConfig, rise_length: int) -> int:
+    return max(
+        int(2 * rise_length) + 1,
+        int(ceil(config.fall_to_rise_ratio_min * rise_length)),
+    )
+
+
+def _minimum_rise_length(config: DynamicSimulationConfig) -> int:
+    return max(config.min_rise_length, int(config.rise_waveform_length))
+
+
+def _rise_waveform(config: DynamicSimulationConfig) -> np.ndarray:
+    length = int(config.rise_waveform_length)
+    return np.full(length, 1.0 / length, dtype=float)
+
+
+def _validate_dynamic_config(
+    config: DynamicSimulationConfig,
+    adjacency: np.ndarray,
+    n_steps: int,
+) -> None:
+    if config.n_episodes < 1:
+        raise ValueError("n_episodes must be positive")
+    if config.min_rise_length < 20:
+        raise ValueError("dynamic rises must contain at least 20 samples")
+    if (
+        not isinstance(config.rise_waveform_length, (int, np.integer))
+        or config.rise_waveform_length < 1
+    ):
+        raise ValueError("rise_waveform_length must be a positive integer")
+    min_rise = _minimum_rise_length(config)
+    if config.max_rise_length < min_rise:
+        raise ValueError(
+            "max_rise_length must be at least the effective minimum rise length"
+        )
+    if config.fall_to_rise_ratio_min <= 2.0:
+        raise ValueError("fall_to_rise_ratio_min must be greater than 2")
+    if config.fall_to_rise_ratio_max < config.fall_to_rise_ratio_min:
+        raise ValueError("fall_to_rise_ratio_max must be at least the minimum ratio")
+    if config.propagation_delay < 1:
+        raise ValueError("propagation_delay must be positive")
+    if config.propagation_delay >= min_rise:
+        raise ValueError("propagation_delay must be shorter than the rise phase")
+    if config.rise_gain <= 0:
+        raise ValueError("rise_gain must be positive")
+    if config.fall_noise_scale < 0:
+        raise ValueError("fall_noise_scale cannot be negative")
+    if config.fall_initial_scale < 0:
+        raise ValueError("fall_initial_scale cannot be negative")
+    if config.fall_initial_ceiling_fraction < 0:
+        raise ValueError("fall_initial_ceiling_fraction cannot be negative")
+    if config.fall_state_mode not in {"passive_decay", "stochastic_independent"}:
+        raise ValueError(
+            "fall_state_mode must be 'passive_decay' or 'stochastic_independent'"
+        )
+    _probability(config.initial_activation_probability, "initial_activation_probability")
+    _probability(config.edge_dropout_probability, "edge_dropout_probability")
+    _probability(config.edge_addition_probability, "edge_addition_probability")
+    _probability(config.source_dropout_probability, "source_dropout_probability")
+    _probability(config.source_recruitment_probability, "source_recruitment_probability")
+    _probability(
+        config.source_recruitment_edge_probability,
+        "source_recruitment_edge_probability",
+    )
+    _probability(config.fall_noise_rate, "fall_noise_rate")
+    min_fall = _minimum_fall_length(config, min_rise)
+    min_total = config.n_episodes * (min_rise + min_fall)
+    if n_steps < min_total:
+        raise ValueError("n_steps is too short for the requested dynamic episodes")
+    if config.adjacency_sequence is None:
+        adjacency_sequence = None
+    else:
+        adjacency_sequence = config.adjacency_sequence
+        if not adjacency_sequence:
+            raise ValueError("adjacency_sequence cannot be empty")
+        for graph in adjacency_sequence:
+            values = np.asarray(graph)
+            if values.shape != adjacency.shape:
+                raise ValueError(
+                    "each dynamic adjacency must match the base adjacency shape"
+                )
+    if config.active_node_sequence is None:
+        return
+    if not config.active_node_sequence:
+        raise ValueError("active_node_sequence cannot be empty")
+    for active_nodes in config.active_node_sequence:
+        values = np.asarray(active_nodes, dtype=bool)
+        if values.shape != (adjacency.shape[0],):
+            raise ValueError(
+                "each active-node mask must provide one value per ROI"
+            )
+        if not values.any():
+            raise ValueError("each active-node mask must retain at least one ROI")
+
+
+def _episode_active_nodes(
+    adjacency: np.ndarray,
+    config: DynamicSimulationConfig,
+    episode_index: int,
+) -> np.ndarray:
+    if config.active_node_sequence is None:
+        return np.ones(adjacency.shape[0], dtype=bool)
+    return np.asarray(
+        config.active_node_sequence[
+            episode_index % len(config.active_node_sequence)
+        ],
+        dtype=bool,
+    ).copy()
+
+
+def _episode_adjacency(
+    base_adjacency: np.ndarray,
+    config: DynamicSimulationConfig,
+    episode_index: int,
+    rng: np.random.Generator,
+    active_nodes: np.ndarray,
+) -> np.ndarray:
+    if config.adjacency_sequence is not None:
+        graph = np.asarray(
+            config.adjacency_sequence[episode_index % len(config.adjacency_sequence)],
+            dtype=bool,
+        ).copy()
+    else:
+        graph = base_adjacency.copy()
+        if config.edge_dropout_probability > 0:
+            graph &= rng.random(graph.shape) >= config.edge_dropout_probability
+            if base_adjacency.any() and not graph.any():
+                edges = np.argwhere(base_adjacency)
+                source, target = edges[int(rng.integers(0, len(edges)))]
+                graph[source, target] = True
+        if config.edge_addition_probability > 0:
+            candidates = ~base_adjacency & ~np.eye(base_adjacency.shape[0], dtype=bool)
+            graph |= candidates & (
+                rng.random(base_adjacency.shape) < config.edge_addition_probability
+            )
+        if config.source_dropout_probability > 0:
+            base_sources = np.flatnonzero(base_adjacency.any(axis=1) & active_nodes)
+            dropped = (
+                rng.random(base_sources.size) < config.source_dropout_probability
+            )
+            if dropped.any():
+                graph[base_sources[dropped], :] = False
+        if config.source_recruitment_probability > 0:
+            base_sources = base_adjacency.any(axis=1)
+            recruitable = np.flatnonzero((~base_sources) & active_nodes)
+            recruited = (
+                rng.random(recruitable.size) < config.source_recruitment_probability
+            )
+            for source in recruitable[recruited]:
+                candidates = active_nodes.copy()
+                candidates[source] = False
+                targets = (
+                    rng.random(base_adjacency.shape[0])
+                    < config.source_recruitment_edge_probability
+                ) & candidates
+                if (
+                    config.source_recruitment_edge_probability > 0
+                    and not targets.any()
+                ):
+                    eligible = np.flatnonzero(candidates)
+                    if eligible.size:
+                        targets[
+                            int(eligible[int(rng.integers(0, len(eligible)))])
+                        ] = True
+                graph[source, targets] = True
+    graph[~active_nodes, :] = False
+    graph[:, ~active_nodes] = False
+    np.fill_diagonal(graph, False)
+    return graph
+
+
+def _simulate_dynamic_calcium_dataset(
+    adjacency: np.ndarray,
+    n_steps: int,
+    gamma: float | np.ndarray,
+    noise_std: float,
+    shared_noise_std: float,
+    spontaneous_rate: float,
+    transmission_probability: float,
+    random_state: int | None,
+    config: DynamicSimulationConfig,
+) -> SyntheticDataset:
+    """Produce an episodic trace where fall phases have no cross-ROI propagation."""
+
+    base = np.asarray(adjacency, dtype=bool).copy()
+    if base.ndim != 2 or base.shape[0] != base.shape[1]:
+        raise ValueError("adjacency must be square")
+    np.fill_diagonal(base, False)
+    if not 0 <= spontaneous_rate <= 1 or not 0 <= transmission_probability <= 1:
+        raise ValueError("event probabilities must lie in [0, 1]")
+    if noise_std < 0 or shared_noise_std < 0:
+        raise ValueError("noise levels cannot be negative")
+    _validate_dynamic_config(config, base, n_steps)
+
+    n_rois = base.shape[0]
+    gamma_rise = _decay_values(gamma, n_rois, "gamma")
+    gamma_fall = gamma_rise if config.gamma_fall is None else _decay_values(
+        config.gamma_fall, n_rois, "gamma_fall"
+    )
+    rng = np.random.default_rng(random_state)
+    events = np.zeros((n_rois, n_steps), dtype=float)
+    propagated_events = np.zeros_like(events)
+    rise_drive = np.zeros_like(events)
+    calcium = np.zeros_like(events)
+    phase_labels = np.zeros(n_steps, dtype=int)
+    episodes: list[SyntheticEpisode] = []
+    rise_adjacencies: list[np.ndarray] = []
+    union_adjacency = np.zeros_like(base, dtype=bool)
+    edge_presence_counts = np.zeros(base.shape, dtype=int)
+    node_presence_counts = np.zeros(n_rois, dtype=int)
+    state = np.zeros(n_rois, dtype=float)
+    cursor = 0
+    min_rise_length = _minimum_rise_length(config)
+    rise_waveform = _rise_waveform(config)
+    min_episode_total = min_rise_length + _minimum_fall_length(
+        config, min_rise_length
+    )
+
+    for episode_index in range(config.n_episodes):
+        remaining_episodes = config.n_episodes - episode_index - 1
+        available = n_steps - cursor - remaining_episodes * min_episode_total
+        max_rise = min(config.max_rise_length, available)
+        while max_rise >= min_rise_length:
+            if max_rise + _minimum_fall_length(config, max_rise) <= available:
+                break
+            max_rise -= 1
+        if max_rise < min_rise_length:
+            raise ValueError("n_steps cannot fit the requested dynamic episode schedule")
+        rise_length = int(
+            rng.integers(min_rise_length, max_rise + 1)
+        )
+        min_fall = _minimum_fall_length(config, rise_length)
+        max_fall = min(
+            int(ceil(config.fall_to_rise_ratio_max * rise_length)),
+            available - rise_length,
+        )
+        fall_length = int(rng.integers(min_fall, max_fall + 1))
+        rise_start = cursor
+        rise_stop = rise_start + rise_length
+        fall_start = rise_stop
+        fall_stop = fall_start + fall_length
+        active_nodes = _episode_active_nodes(base, config, episode_index)
+        graph = _episode_adjacency(base, config, episode_index, rng, active_nodes)
+        rise_adjacencies.append(graph.copy())
+        union_adjacency |= graph
+        edge_presence_counts += graph.astype(int)
+        node_presence_counts += active_nodes.astype(int)
+        episodes.append(
+            SyntheticEpisode(
+                rise_start,
+                rise_stop,
+                fall_start,
+                fall_stop,
+                graph,
+                active_nodes=active_nodes.copy(),
+            )
+        )
+        state = state.copy()
+        state[~active_nodes] = 0.0
+
+        for time in range(rise_start, rise_stop):
+            phase_labels[time] = 1
+            if time == rise_start:
+                spontaneous = (
+                    rng.random(n_rois) < config.initial_activation_probability
+                ) & active_nodes
+                if active_nodes.any() and not spontaneous.any():
+                    available_nodes = np.flatnonzero(active_nodes)
+                    spontaneous[
+                        available_nodes[
+                            int(rng.integers(0, len(available_nodes)))
+                        ]
+                    ] = True
+            else:
+                spontaneous = (rng.random(n_rois) < spontaneous_rate) & active_nodes
+            if time - config.propagation_delay >= rise_start:
+                incoming = (
+                    graph.T @ (events[:, time - config.propagation_delay] > 0) > 0
+                )
+            else:
+                incoming = np.zeros(n_rois, dtype=bool)
+            propagated = (
+                incoming
+                & (rng.random(n_rois) < transmission_probability)
+                & active_nodes
+            )
+            onset = (spontaneous | propagated).astype(float) * config.rise_gain
+            events[:, time] = onset
+            propagated_events[:, time] = propagated.astype(float) * config.rise_gain
+            drive_stop = min(rise_stop, time + rise_waveform.size)
+            drive_length = drive_stop - time
+            if drive_length > 0:
+                rise_drive[:, time:drive_stop] += (
+                    onset[:, None] * rise_waveform[:drive_length][None, :]
+                )
+            state = gamma_rise * state + rise_drive[:, time]
+            state[~active_nodes] = 0.0
+            calcium[:, time] = state
+
+        if config.fall_state_mode == "stochastic_independent":
+            reset_state = np.zeros(n_rois, dtype=float)
+            ceiling = np.maximum(config.fall_initial_ceiling_fraction * state, 0.0)
+            if active_nodes.any():
+                reset_state[active_nodes] = np.minimum(
+                    rng.exponential(
+                        config.fall_initial_scale, size=int(np.count_nonzero(active_nodes))
+                    ),
+                    ceiling[active_nodes],
+                )
+            state = reset_state
+        else:
+            state = state.copy()
+            state[~active_nodes] = 0.0
+
+        for time in range(fall_start, fall_stop):
+            phase_labels[time] = 2
+            local_noise = np.zeros(n_rois, dtype=float)
+            noisy_nodes = (rng.random(n_rois) < config.fall_noise_rate) & active_nodes
+            if noisy_nodes.any():
+                local_noise[noisy_nodes] = rng.exponential(
+                    config.fall_noise_scale,
+                    size=int(np.count_nonzero(noisy_nodes)),
+                )
+            max_noise = np.maximum((1.0 - gamma_fall) * state * 0.8, 0.0)
+            innovation = np.minimum(local_noise, max_noise)
+            events[:, time] = innovation
+            state = gamma_fall * state + innovation
+            state[~active_nodes] = 0.0
+            calcium[:, time] = state
+
+        cursor = fall_stop
+
+    for time in range(cursor, n_steps):
+        state = gamma_fall * state
+        calcium[:, time] = state
+
+    shared = rng.normal(scale=shared_noise_std, size=(1, n_steps))
+    noise = rng.normal(scale=noise_std, size=calcium.shape)
+    edge_prevalence = edge_presence_counts / len(episodes)
+    node_prevalence = node_presence_counts / len(episodes)
+    return SyntheticDataset(
+        adjacency=union_adjacency,
+        events=events,
+        calcium=calcium,
+        fluorescence=calcium + shared + noise,
+        phase_labels=phase_labels,
+        episodes=tuple(episodes),
+        propagated_events=propagated_events,
+        rise_adjacencies=tuple(rise_adjacencies),
+        edge_presence_counts=edge_presence_counts,
+        edge_prevalence=edge_prevalence,
+        node_presence_counts=node_presence_counts,
+        node_prevalence=node_prevalence,
+    )
+
+
 def simulate_calcium_dataset(
     adjacency: np.ndarray,
     n_steps: int = 1000,
@@ -138,8 +620,26 @@ def simulate_calcium_dataset(
     spontaneous_rate: float = 0.025,
     transmission_probability: float = 0.8,
     random_state: int | None = None,
+    propagation_delay: int = 1,
+    simulator_mode: str = "static",
+    dynamic_config: DynamicSimulationConfig | None = None,
 ) -> SyntheticDataset:
     """Produce synthetic calcium observations with directed-event truth."""
+
+    if simulator_mode not in {"static", "episodic_dynamic"}:
+        raise ValueError("simulator_mode must be 'static' or 'episodic_dynamic'")
+    if simulator_mode == "episodic_dynamic":
+        return _simulate_dynamic_calcium_dataset(
+            adjacency,
+            n_steps,
+            gamma,
+            noise_std,
+            shared_noise_std,
+            spontaneous_rate,
+            transmission_probability,
+            random_state,
+            DynamicSimulationConfig() if dynamic_config is None else dynamic_config,
+        )
 
     events = simulate_events(
         adjacency,
@@ -147,6 +647,7 @@ def simulate_calcium_dataset(
         spontaneous_rate,
         transmission_probability,
         random_state,
+        propagation_delay,
     )
     calcium, fluorescence = calcium_observation_model(
         events, gamma, noise_std, shared_noise_std, random_state
@@ -265,7 +766,7 @@ def cross_recording_surrogate(reference: np.ndarray, donor: np.ndarray) -> np.nd
 
 def run_null_controls(
     traces: np.ndarray,
-    estimator: CausalGranger,
+    estimator: CausalisedGC,
     n_surrogates: int = 20,
     random_state: int | None = None,
     segment_ids: np.ndarray | None = None,
@@ -280,7 +781,9 @@ def run_null_controls(
     for _ in range(n_surrogates):
         seed = int(rng.integers(0, np.iinfo(np.int32).max))
         surrogate = cyclic_shift_surrogate(
-            values, random_state=seed, minimum_shift=estimator.max_lag + 1
+            values,
+            random_state=seed,
+            minimum_shift=getattr(estimator, "n_pasts", estimator.max_lag) + 1,
         )
         shifted.append(estimator.fit(surrogate, segment_ids=segment_ids))
     return NullControlResult(
@@ -295,7 +798,7 @@ def run_null_controls(
 
 def run_event_null_controls(
     traces: np.ndarray,
-    estimator: CausalGranger,
+    estimator: CausalisedGC,
     event_indices: tuple[np.ndarray, ...] | list[np.ndarray],
     *,
     alternative_event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None = None,
@@ -358,7 +861,7 @@ def run_event_null_controls(
 
 def run_event_bootstrap_stability(
     traces: np.ndarray,
-    estimator: CausalGranger,
+    estimator: CausalisedGC,
     event_indices: tuple[np.ndarray, ...] | list[np.ndarray],
     n_bootstrap: int = 20,
     random_state: int | None = None,
@@ -385,9 +888,235 @@ def run_event_bootstrap_stability(
     )
 
 
+def _windowed_event_indices(
+    event_indices: tuple[np.ndarray, ...],
+    start: int,
+    stop: int,
+) -> tuple[np.ndarray, ...]:
+    selected = []
+    for frames in event_indices:
+        values = frames[(frames >= start) & (frames < stop)] - start
+        selected.append(values.astype(int, copy=False))
+    return tuple(selected)
+
+
+def run_time_window_stability(
+    traces: np.ndarray,
+    estimator: CausalisedGC,
+    window_length: int,
+    step: int | None = None,
+    *,
+    event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None = None,
+) -> StabilityResult:
+    """Estimate graph stability across contiguous time windows."""
+
+    values = validate_traces(traces)
+    if not isinstance(window_length, int) or window_length < 3:
+        raise ValueError("window_length must be an integer of at least three")
+    if window_length > values.shape[1]:
+        raise ValueError("window_length cannot exceed the trace length")
+    stride = window_length if step is None else step
+    if not isinstance(stride, int) or stride < 1:
+        raise ValueError("step must be a positive integer")
+    selected = (
+        None
+        if event_indices is None
+        else tuple(np.asarray(frames, dtype=int) for frames in event_indices)
+    )
+    if selected is not None and len(selected) != values.shape[0]:
+        raise ValueError("event_indices must contain one entry per ROI")
+
+    graphs = []
+    for start in range(0, values.shape[1] - window_length + 1, stride):
+        stop = start + window_length
+        window_events = (
+            None if selected is None else _windowed_event_indices(selected, start, stop)
+        )
+        graphs.append(
+            estimator.fit(values[:, start:stop], event_indices=window_events)
+        )
+    if len(graphs) < 2:
+        raise ValueError("at least two windows are required for stability")
+    return StabilityResult(
+        graphs=tuple(graphs),
+        stability=graph_stability([graph.adjacency for graph in graphs]),
+    )
+
+
+def run_leave_one_neuron_stability(
+    traces: np.ndarray,
+    estimator: CausalisedGC,
+    *,
+    event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None = None,
+) -> StabilityResult:
+    """Estimate graph stability after removing each ROI in turn."""
+
+    values = validate_traces(traces)
+    if values.shape[0] < 3:
+        raise ValueError("at least three ROIs are required for leave-one-neuron stability")
+    selected = (
+        None
+        if event_indices is None
+        else tuple(np.asarray(frames, dtype=int) for frames in event_indices)
+    )
+    if selected is not None and len(selected) != values.shape[0]:
+        raise ValueError("event_indices must contain one entry per ROI")
+
+    graphs = []
+    for omitted in range(values.shape[0]):
+        keep = np.array([index for index in range(values.shape[0]) if index != omitted])
+        subset_events = (
+            None if selected is None else tuple(selected[index] for index in keep)
+        )
+        graph = estimator.fit(values[keep], event_indices=subset_events)
+        scores = np.zeros((values.shape[0], values.shape[0]), dtype=float)
+        p_values = np.ones_like(scores)
+        adjacency = np.zeros((values.shape[0], values.shape[0]), dtype=bool)
+        best_lags = np.zeros_like(adjacency, dtype=int)
+        scores[np.ix_(keep, keep)] = graph.scores
+        p_values[np.ix_(keep, keep)] = graph.p_values
+        adjacency[np.ix_(keep, keep)] = graph.adjacency
+        best_lags[np.ix_(keep, keep)] = graph.best_lags
+        graphs.append(
+            GraphResult(
+                scores=scores,
+                p_values=p_values,
+                adjacency=adjacency,
+                best_lags=best_lags,
+                estimator=graph.estimator,
+            )
+        )
+    return StabilityResult(
+        graphs=tuple(graphs),
+        stability=graph_stability([graph.adjacency for graph in graphs]),
+    )
+
+
+def _contiguous_segments(frames: np.ndarray) -> tuple[np.ndarray, ...]:
+    if frames.size == 0:
+        return ()
+    values = np.unique(np.asarray(frames, dtype=int))
+    breaks = np.flatnonzero(np.diff(values) > 1) + 1
+    return tuple(np.asarray(segment, dtype=int) for segment in np.split(values, breaks))
+
+
+def _transient_segments(
+    event_indices: tuple[np.ndarray, ...],
+) -> tuple[tuple[int, np.ndarray], ...]:
+    segments = []
+    for roi, frames in enumerate(event_indices):
+        for segment in _contiguous_segments(frames):
+            segments.append((roi, segment))
+    return tuple(segments)
+
+
+def run_leave_one_transient_stability(
+    traces: np.ndarray,
+    estimator: CausalisedGC,
+    event_indices: tuple[np.ndarray, ...] | list[np.ndarray],
+) -> StabilityResult:
+    """Estimate selected-frame graph stability after dropping one transient."""
+
+    values = validate_traces(traces)
+    selected = tuple(np.asarray(frames, dtype=int) for frames in event_indices)
+    if len(selected) != values.shape[0]:
+        raise ValueError("event_indices must contain one entry per ROI")
+    segments = _transient_segments(selected)
+    if len(segments) < 2:
+        raise ValueError("at least two transient segments are required")
+
+    graphs = []
+    for roi, segment in segments:
+        reduced = [frames.copy() for frames in selected]
+        reduced[roi] = np.setdiff1d(reduced[roi], segment, assume_unique=True)
+        graphs.append(estimator.fit(values, event_indices=tuple(reduced)))
+    return StabilityResult(
+        graphs=tuple(graphs),
+        stability=graph_stability([graph.adjacency for graph in graphs]),
+    )
+
+
+def _representation_truths(dataset: SyntheticDataset) -> dict[str, np.ndarray]:
+    union = np.asarray(dataset.adjacency, dtype=bool).copy()
+    truth = {
+        "full": union.copy(),
+        "deconvolved": union.copy(),
+        "rise": union.copy(),
+        "fall": union.copy(),
+        "fall_residual": union.copy(),
+    }
+    if dataset.episodes:
+        noncausal = np.zeros_like(union, dtype=bool)
+        truth["fall"] = noncausal.copy()
+        truth["fall_residual"] = noncausal.copy()
+    return truth
+
+
+def _episode_segment_ids(dataset: SyntheticDataset, phase: str) -> np.ndarray | None:
+    if not dataset.episodes:
+        return None
+    if phase not in {"rise", "fall"}:
+        raise ValueError("phase must be 'rise' or 'fall'")
+    n_steps = dataset.fluorescence.shape[1]
+    segment_ids = np.full(n_steps, -1, dtype=int)
+    for index, episode in enumerate(dataset.episodes, start=1):
+        if phase == "rise":
+            segment_ids[episode.rise_start : episode.rise_stop] = index
+        else:
+            segment_ids[episode.fall_start : episode.fall_stop] = index
+    return segment_ids
+
+
+def _fit_selected_representation(
+    dataset: SyntheticDataset,
+    estimator: CausalisedGC,
+    representation: np.ndarray,
+    phase: str,
+) -> GraphResult:
+    event_indices = selected_frame_indices(representation)
+    segment_ids = None
+    if getattr(estimator, "event_mode", None) == "physical":
+        segment_ids = _episode_segment_ids(dataset, phase)
+    return estimator.fit(
+        dataset.fluorescence,
+        segment_ids=segment_ids,
+        event_indices=event_indices,
+    )
+
+
+def _fit_rise_representation(
+    dataset: SyntheticDataset,
+    estimator: CausalisedGC,
+    representation: np.ndarray,
+) -> tuple[GraphResult, RiseFlankCandidateResult | None]:
+    candidates = None
+    candidate_adjacency = None
+    if (
+        getattr(estimator, "min_rise_run_samples", 1) > 1
+        or getattr(estimator, "rise_candidate_filter", False)
+    ):
+        candidates = estimator.rise_flank_candidates(representation)
+        event_indices = candidates.event_indices
+        if estimator.rise_candidate_filter:
+            candidate_adjacency = candidates.candidate_adjacency
+    else:
+        event_indices = selected_frame_indices(representation)
+
+    segment_ids = None
+    if getattr(estimator, "event_mode", None) == "physical":
+        segment_ids = _episode_segment_ids(dataset, "rise")
+    graph = estimator.fit(
+        dataset.fluorescence,
+        segment_ids=segment_ids,
+        event_indices=event_indices,
+        candidate_adjacency=candidate_adjacency,
+    )
+    return graph, candidates
+
+
 def validate_representations(
     dataset: SyntheticDataset,
-    estimator: CausalGranger,
+    estimator: CausalisedGC,
     tolerance: float | np.ndarray = 0.0,
     gamma: float | np.ndarray | None = None,
 ) -> RepresentationValidation:
@@ -396,27 +1125,31 @@ def validate_representations(
     representations = build_representations(
         dataset.fluorescence, tolerance=tolerance, gamma=gamma
     )
+    rise_graph, rise_flank_candidates = _fit_rise_representation(
+        dataset, estimator, representations.rise
+    )
     graphs = {
         "full": estimator.fit(representations.full),
         "deconvolved": estimator.fit(representations.deconvolved),
-        "rise": estimator.fit(
-            dataset.fluorescence,
-            event_indices=selected_frame_indices(representations.rise),
+        "rise": rise_graph,
+        "fall": _fit_selected_representation(
+            dataset, estimator, representations.fall, "fall"
         ),
-        "fall": estimator.fit(
-            dataset.fluorescence,
-            event_indices=selected_frame_indices(representations.fall),
-        ),
-        "fall_residual": estimator.fit(
-            dataset.fluorescence,
-            event_indices=selected_frame_indices(representations.fall_residual),
+        "fall_residual": _fit_selected_representation(
+            dataset, estimator, representations.fall_residual, "fall"
         ),
     }
+    truth = _representation_truths(dataset)
     recovery = {
-        label: evaluate_against_truth(dataset.adjacency, graph)
+        label: evaluate_against_truth(truth[label], graph)
         for label, graph in graphs.items()
     }
-    return RepresentationValidation(graphs=graphs, recovery=recovery)
+    return RepresentationValidation(
+        graphs=graphs,
+        recovery=recovery,
+        truth=truth,
+        rise_flank_candidates=rise_flank_candidates,
+    )
 
 
 def evaluate_against_truth(

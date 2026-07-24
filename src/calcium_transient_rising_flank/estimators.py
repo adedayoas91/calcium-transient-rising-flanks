@@ -1,4 +1,4 @@
-"""Typed result adapter for the supplied rising-flank c-GC implementation."""
+"""Typed adapters for the supplied c-GC/c-GC* implementation."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from pathlib import Path
 import sys
 
 import numpy as np
-
-from core.rising_flanks import RisingFlanks
 
 from .preprocessing import validate_traces
 
@@ -38,10 +36,85 @@ class GraphResult:
     adjacency: np.ndarray
     best_lags: np.ndarray
     estimator: str
+    candidate_adjacency: np.ndarray | None = None
 
     @property
     def retained_scores(self) -> np.ndarray:
         return np.where(self.adjacency, self.scores, 0.0)
+
+
+@dataclass(frozen=True)
+class RiseFlankRunSummary:
+    """Contiguous rising-flank runs retained after duration filtering."""
+
+    kept_runs: tuple[tuple[np.ndarray, ...], ...]
+    dropped_runs: tuple[tuple[np.ndarray, ...], ...]
+    event_indices: tuple[np.ndarray, ...]
+    min_run_samples: int
+
+    @property
+    def kept_counts(self) -> np.ndarray:
+        return np.asarray([len(runs) for runs in self.kept_runs], dtype=int)
+
+    @property
+    def dropped_counts(self) -> np.ndarray:
+        return np.asarray([len(runs) for runs in self.dropped_runs], dtype=int)
+
+    def expanded_event_indices(
+        self,
+        n_steps: int,
+        context_samples: int = 0,
+    ) -> tuple[np.ndarray, ...]:
+        """Return retained rise runs plus consecutive context frames."""
+
+        if n_steps < 1:
+            raise ValueError("n_steps must be positive")
+        if context_samples < 0:
+            raise ValueError("context_samples cannot be negative")
+        expanded: list[np.ndarray] = []
+        for roi_runs in self.kept_runs:
+            if not roi_runs:
+                expanded.append(np.array([], dtype=int))
+                continue
+            frames = [
+                np.arange(
+                    max(0, int(run[0]) - context_samples),
+                    min(n_steps, int(run[-1]) + context_samples + 1),
+                    dtype=int,
+                )
+                for run in roi_runs
+            ]
+            expanded.append(np.unique(np.concatenate(frames)))
+        return tuple(expanded)
+
+
+@dataclass(frozen=True)
+class RiseFlankCandidateMatch:
+    """One shifted-overlap match between a retained source and target rise."""
+
+    source: int
+    target: int
+    source_run: int
+    target_run: int
+    lag: int
+    overlap_count: int
+    overlap_fraction: float
+    source_start: int
+    target_start: int
+    start_lag: int
+
+
+@dataclass(frozen=True)
+class RiseFlankCandidateResult:
+    """Candidate directed pairs proposed by shifted rising-flank alignment."""
+
+    runs: RiseFlankRunSummary
+    matches: tuple[RiseFlankCandidateMatch, ...]
+    candidate_adjacency: np.ndarray
+    support_counts: np.ndarray
+    best_lags: np.ndarray
+    mean_overlap_fraction: np.ndarray
+    event_indices: tuple[np.ndarray, ...] | None = None
 
 
 def selected_frame_indices(representation: np.ndarray) -> tuple[np.ndarray, ...]:
@@ -51,7 +124,230 @@ def selected_frame_indices(representation: np.ndarray) -> tuple[np.ndarray, ...]
     return tuple(np.flatnonzero(row > 0.0) for row in values)
 
 
-def benjamini_hochberg(p_values: np.ndarray, alpha: float) -> np.ndarray:
+def _contiguous_runs(frames: np.ndarray) -> tuple[np.ndarray, ...]:
+    if frames.size == 0:
+        return ()
+    breaks = np.flatnonzero(np.diff(frames) > 1) + 1
+    return tuple(run.astype(int, copy=True) for run in np.split(frames, breaks))
+
+
+def extract_rise_flank_runs(
+    representation: np.ndarray,
+    min_run_samples: int = 1,
+) -> RiseFlankRunSummary:
+    """Return list-of-lists style contiguous rising-flank runs per ROI.
+
+    Runs shorter than ``min_run_samples`` are omitted from ``event_indices`` and
+    preserved in ``dropped_runs`` for reporting.
+    """
+
+    if min_run_samples < 1:
+        raise ValueError("min_run_samples must be at least 1")
+    values = validate_traces(representation)
+    kept_by_roi: list[tuple[np.ndarray, ...]] = []
+    dropped_by_roi: list[tuple[np.ndarray, ...]] = []
+    event_indices: list[np.ndarray] = []
+    for row in values:
+        runs = _contiguous_runs(np.flatnonzero(row > 0.0))
+        kept = tuple(run for run in runs if run.size >= min_run_samples)
+        dropped = tuple(run for run in runs if run.size < min_run_samples)
+        kept_by_roi.append(kept)
+        dropped_by_roi.append(dropped)
+        if kept:
+            event_indices.append(np.concatenate(kept).astype(int, copy=False))
+        else:
+            event_indices.append(np.array([], dtype=int))
+    return RiseFlankRunSummary(
+        kept_runs=tuple(kept_by_roi),
+        dropped_runs=tuple(dropped_by_roi),
+        event_indices=tuple(event_indices),
+        min_run_samples=min_run_samples,
+    )
+
+
+def _normalise_rise_runs(
+    runs_by_roi: Sequence[Sequence[np.ndarray]],
+) -> tuple[tuple[np.ndarray, ...], ...]:
+    normalised: list[tuple[np.ndarray, ...]] = []
+    for roi_runs in runs_by_roi:
+        converted = []
+        for run in roi_runs:
+            values = np.asarray(run, dtype=int)
+            if values.ndim != 1:
+                raise ValueError("each rise run must be one-dimensional")
+            if np.any(values < 0):
+                raise ValueError("rise runs cannot contain negative frame indices")
+            if values.size and not np.array_equal(values, np.unique(values)):
+                raise ValueError("rise runs must be sorted and unique")
+            converted.append(values)
+        normalised.append(tuple(converted))
+    return tuple(normalised)
+
+
+def match_shifted_rise_flank_runs(
+    runs_by_roi: Sequence[Sequence[np.ndarray]],
+    *,
+    max_lag: int,
+    min_lag: int = 1,
+    min_overlap_samples: int = 1,
+    min_overlap_fraction: float = 0.5,
+) -> RiseFlankCandidateResult:
+    """Match retained rise runs by shifted overlap and summarize candidates.
+
+    A source-to-target match at lag ``l`` means the target run starts after the
+    source run within the allowed lag window and ``source_run + l`` overlaps the
+    target run strongly enough. This is only a candidate screen; causal testing
+    is still performed by c-GC/c-GC*.
+    """
+
+    if min_lag < 0:
+        raise ValueError("min_lag cannot be negative")
+    if max_lag < min_lag:
+        raise ValueError("max_lag must be greater than or equal to min_lag")
+    if min_overlap_samples < 1:
+        raise ValueError("min_overlap_samples must be at least 1")
+    if not 0 < min_overlap_fraction <= 1:
+        raise ValueError("min_overlap_fraction must lie in (0, 1]")
+
+    runs = _normalise_rise_runs(runs_by_roi)
+    n_nodes = len(runs)
+    candidate = np.zeros((n_nodes, n_nodes), dtype=bool)
+    support = np.zeros((n_nodes, n_nodes), dtype=int)
+    best_lags = np.zeros((n_nodes, n_nodes), dtype=int)
+    overlap_sums = np.zeros((n_nodes, n_nodes), dtype=float)
+    lag_support: dict[tuple[int, int], dict[int, int]] = {}
+    matches: list[RiseFlankCandidateMatch] = []
+
+    for source, source_runs in enumerate(runs):
+        for target, target_runs in enumerate(runs):
+            if source == target:
+                continue
+            for source_index, source_run in enumerate(source_runs):
+                for target_index, target_run in enumerate(target_runs):
+                    if source_run.size == 0 or target_run.size == 0:
+                        continue
+                    best_match: RiseFlankCandidateMatch | None = None
+                    best_key: tuple[float, int, int] | None = None
+                    denominator = min(source_run.size, target_run.size)
+                    start_lag = int(target_run[0] - source_run[0])
+                    if start_lag < min_lag or start_lag > max_lag:
+                        continue
+                    for lag in range(min_lag, max_lag + 1):
+                        shifted_source = source_run + lag
+                        overlap = np.intersect1d(
+                            shifted_source,
+                            target_run,
+                            assume_unique=True,
+                        ).size
+                        overlap_fraction = overlap / denominator
+                        if (
+                            overlap < min_overlap_samples
+                            or overlap_fraction < min_overlap_fraction
+                        ):
+                            continue
+                        key = (
+                            float(overlap_fraction),
+                            int(overlap),
+                            -abs(lag - start_lag),
+                        )
+                        if best_key is None or key > best_key:
+                            best_key = key
+                            best_match = RiseFlankCandidateMatch(
+                                source=source,
+                                target=target,
+                                source_run=source_index,
+                                target_run=target_index,
+                                lag=lag,
+                                overlap_count=int(overlap),
+                                overlap_fraction=float(overlap_fraction),
+                                source_start=int(source_run[0]),
+                                target_start=int(target_run[0]),
+                                start_lag=start_lag,
+                            )
+                    if best_match is None:
+                        continue
+                    matches.append(best_match)
+                    candidate[source, target] = True
+                    support[source, target] += 1
+                    overlap_sums[source, target] += best_match.overlap_fraction
+                    pair_key = (source, target)
+                    lag_counts = lag_support.setdefault(pair_key, {})
+                    lag_counts[best_match.lag] = (
+                        lag_counts.get(best_match.lag, 0) + 1
+                    )
+
+    for (source, target), counts in lag_support.items():
+        best_lags[source, target] = max(counts, key=lambda lag: (counts[lag], -lag))
+    mean_overlap = np.divide(
+        overlap_sums,
+        support,
+        out=np.zeros_like(overlap_sums),
+        where=support > 0,
+    )
+    empty_summary = RiseFlankRunSummary(
+        kept_runs=runs,
+        dropped_runs=tuple(() for _ in runs),
+        event_indices=tuple(
+            np.concatenate(roi_runs) if roi_runs else np.array([], dtype=int)
+            for roi_runs in runs
+        ),
+        min_run_samples=1,
+    )
+    return RiseFlankCandidateResult(
+        runs=empty_summary,
+        matches=tuple(matches),
+        candidate_adjacency=candidate,
+        support_counts=support,
+        best_lags=best_lags,
+        mean_overlap_fraction=mean_overlap,
+        event_indices=empty_summary.event_indices,
+    )
+
+
+def rise_flank_candidate_pairs(
+    representation: np.ndarray,
+    *,
+    min_run_samples: int = 1,
+    max_lag: int,
+    min_lag: int = 1,
+    min_overlap_samples: int | None = None,
+    min_overlap_fraction: float = 0.5,
+    context_samples: int = 0,
+) -> RiseFlankCandidateResult:
+    """Extract retained rise runs and propose shifted-overlap candidate pairs."""
+
+    values = validate_traces(representation)
+    if context_samples < 0:
+        raise ValueError("context_samples cannot be negative")
+    runs = extract_rise_flank_runs(representation, min_run_samples)
+    overlap_samples = (
+        max(1, int(np.ceil(min_run_samples * min_overlap_fraction)))
+        if min_overlap_samples is None
+        else min_overlap_samples
+    )
+    candidates = match_shifted_rise_flank_runs(
+        runs.kept_runs,
+        max_lag=max_lag,
+        min_lag=min_lag,
+        min_overlap_samples=overlap_samples,
+        min_overlap_fraction=min_overlap_fraction,
+    )
+    return RiseFlankCandidateResult(
+        runs=runs,
+        matches=candidates.matches,
+        candidate_adjacency=candidates.candidate_adjacency,
+        support_counts=candidates.support_counts,
+        best_lags=candidates.best_lags,
+        mean_overlap_fraction=candidates.mean_overlap_fraction,
+        event_indices=runs.expanded_event_indices(values.shape[1], context_samples),
+    )
+
+
+def benjamini_hochberg(
+    p_values: np.ndarray,
+    alpha: float,
+    eligible_mask: np.ndarray | None = None,
+) -> np.ndarray:
     """Return discoveries after Benjamini-Hochberg FDR control."""
 
     values = np.asarray(p_values, dtype=float)
@@ -60,6 +356,11 @@ def benjamini_hochberg(p_values: np.ndarray, alpha: float) -> np.ndarray:
     eligible = np.isfinite(values)
     if values.ndim == 2 and values.shape[0] == values.shape[1]:
         eligible &= ~np.eye(values.shape[0], dtype=bool)
+    if eligible_mask is not None:
+        mask = np.asarray(eligible_mask, dtype=bool)
+        if mask.shape != values.shape:
+            raise ValueError("eligible_mask must match p_values")
+        eligible &= mask
     flattened = values[eligible]
     discoveries = np.zeros(values.shape, dtype=bool)
     if flattened.size == 0:
@@ -72,12 +373,12 @@ def benjamini_hochberg(p_values: np.ndarray, alpha: float) -> np.ndarray:
     return discoveries
 
 
-class CausalGranger:
-    """Adapt ``core.rising_flanks.RisingFlanks`` to typed graph outputs.
+class CausalisedGC:
+    """Run supplied c-GC/c-GC* and return a typed graph result.
 
-    This class does not implement Granger causality. It passes raw traces and
-    optionally selected rising/falling frame indices to the supplied core
-    method, then reduces its lag blocks to the public ``GraphResult`` shape.
+    ``event_mode="physical"`` invokes the modified c-GC/c-GC* path in
+    ``src/core/causalised-GC.py`` so selected samples keep their original frame
+    lag and optional segment IDs prevent cross-transient discontinuities.
     """
 
     def __init__(
@@ -88,178 +389,91 @@ class CausalGranger:
         random_state: int | None = None,
         fdr: bool = True,
         score_threshold: float = 0.0,
-        sampling_frequency: float = 1.0,
-        segment_length: int = 0,
         event_mode: str = "compressed",
-        engine: str = "rising_flanks",
-        gcstar_method: str = "cgc",
+        method: str = "cgc",
         beta: float | None = None,
-        gcstar_simulation: bool = True,
+        simulation: bool = True,
+        tau: int | None = None,
+        n_pasts: int | None = None,
+        min_rise_run_samples: int = 1,
+        rise_candidate_filter: bool = False,
+        rise_match_min_lag: int = 1,
+        rise_match_max_lag: int | None = None,
+        rise_match_min_overlap_samples: int | None = None,
+        rise_match_min_overlap_fraction: float = 0.5,
+        rise_run_context_samples: int | None = None,
     ) -> None:
         if max_lag < 1:
             raise ValueError("max_lag must be positive")
+        if tau is not None and tau < 1:
+            raise ValueError("tau must be positive when provided")
         if n_surrogates < 0:
             raise ValueError("n_surrogates cannot be negative")
         if not 0 < alpha < 1:
             raise ValueError("alpha must lie in (0, 1)")
-        self.max_lag = max_lag
+        if event_mode not in {"compressed", "physical"}:
+            raise ValueError("event_mode must be 'compressed' or 'physical'")
+        self.tau = tau
+        self.max_lag = max(max_lag, tau) if tau is not None else max_lag
+        self.n_pasts = self.max_lag if n_pasts is None else n_pasts
+        if self.n_pasts < self.max_lag:
+            raise ValueError("n_pasts must be at least max_lag or tau")
         self.n_surrogates = n_surrogates
         self.alpha = alpha
         self.random_state = random_state
         self.fdr = fdr
         self.score_threshold = score_threshold
-        self.sampling_frequency = sampling_frequency
-        self.segment_length = segment_length
-        if event_mode not in {"compressed", "physical"}:
-            raise ValueError("event_mode must be 'compressed' or 'physical'")
         self.event_mode = event_mode
-        if engine not in {"rising_flanks", "gcstar"}:
-            raise ValueError("engine must be 'rising_flanks' or 'gcstar'")
-        self.engine = engine
-        self.gcstar_method = gcstar_method
+        self.method = method
         self.beta = alpha if beta is None else beta
         if not 0 < self.beta < 1:
             raise ValueError("beta must lie in (0, 1)")
-        self.gcstar_simulation = gcstar_simulation
+        self.simulation = simulation
+        if min_rise_run_samples < 1:
+            raise ValueError("min_rise_run_samples must be at least 1")
+        if rise_match_min_lag < 0:
+            raise ValueError("rise_match_min_lag cannot be negative")
+        default_match_max_lag = self.tau if self.tau is not None else self.max_lag
+        self.rise_match_max_lag = (
+            default_match_max_lag
+            if rise_match_max_lag is None
+            else rise_match_max_lag
+        )
+        if self.rise_match_max_lag < rise_match_min_lag:
+            raise ValueError(
+                "rise_match_max_lag must be greater than or equal to "
+                "rise_match_min_lag"
+            )
+        if (
+            rise_match_min_overlap_samples is not None
+            and rise_match_min_overlap_samples < 1
+        ):
+            raise ValueError("rise_match_min_overlap_samples must be at least 1")
+        if not 0 < rise_match_min_overlap_fraction <= 1:
+            raise ValueError("rise_match_min_overlap_fraction must lie in (0, 1]")
+        self.min_rise_run_samples = min_rise_run_samples
+        self.rise_candidate_filter = rise_candidate_filter
+        self.rise_match_min_lag = rise_match_min_lag
+        self.rise_match_min_overlap_samples = rise_match_min_overlap_samples
+        self.rise_match_min_overlap_fraction = rise_match_min_overlap_fraction
+        self.rise_run_context_samples = (
+            self.n_pasts
+            if rise_run_context_samples is None
+            else rise_run_context_samples
+        )
+        if self.rise_run_context_samples < 0:
+            raise ValueError("rise_run_context_samples cannot be negative")
 
     @staticmethod
     def _indices(
         data: np.ndarray,
         event_indices: Sequence[np.ndarray] | None,
-    ) -> tuple[np.ndarray, ...]:
+    ) -> tuple[np.ndarray, ...] | None:
         if event_indices is None:
-            all_frames = np.arange(data.shape[1], dtype=int)
-            return tuple(all_frames.copy() for _ in range(data.shape[0]))
+            return None
+        if len(event_indices) != data.shape[0]:
+            raise ValueError("event_indices must contain one entry per ROI")
         return tuple(np.asarray(values, dtype=int) for values in event_indices)
-
-    def _fit_core(
-        self,
-        data: np.ndarray,
-        event_indices: tuple[np.ndarray, ...],
-    ) -> RisingFlanks:
-        core = RisingFlanks(
-            n_perm=self.n_surrogates,
-            n_pasts=self.max_lag,
-            n_lags=self.max_lag,
-            f_s=self.sampling_frequency,
-            seg_len=self.segment_length,
-        )
-        if self.random_state is None:
-            return core.fit_rising(data, event_indices, verbose=0)
-
-        random_state = np.random.get_state()
-        try:
-            np.random.seed(self.random_state)
-            return core.fit_rising(data, event_indices, verbose=0)
-        finally:
-            np.random.set_state(random_state)
-
-    @staticmethod
-    def _at_best_lag(values: np.ndarray, best: np.ndarray) -> np.ndarray:
-        return np.take_along_axis(values, best[np.newaxis, :, :], axis=0)[0]
-
-    @staticmethod
-    def _absolute_corr(x: np.ndarray, y: np.ndarray) -> float:
-        if x.size < 2 or y.size < 2 or np.std(x) == 0 or np.std(y) == 0:
-            return 0.0
-        return float(np.abs(np.corrcoef(x, y)[1, 0]))
-
-    def _perm_test(self, x: np.ndarray, y: np.ndarray) -> float:
-        if self.n_surrogates <= 0 or x.size < 2 or y.size < 2:
-            return 1.0
-        observed = self._absolute_corr(x, y)
-        if observed == 0.0:
-            return 1.0
-        count = 0
-        for shift in np.random.randint(1, len(x), self.n_surrogates):
-            if self._absolute_corr(np.roll(x, shift), y) >= observed:
-                count += 1
-        return count / self.n_surrogates
-
-    @staticmethod
-    def _residual(values: np.ndarray, covariates: np.ndarray) -> np.ndarray:
-        if covariates.size == 0:
-            return values - np.mean(values)
-        design = np.column_stack([np.ones(values.size), covariates.T])
-        coefficients, *_ = np.linalg.lstsq(design, values, rcond=None)
-        return values - design @ coefficients
-
-    def _physical_sample_times(
-        self,
-        event_indices: tuple[np.ndarray, ...],
-        source: int,
-        target: int,
-        lag: int,
-        n_steps: int,
-    ) -> np.ndarray:
-        selected_target = event_indices[target]
-        selected_source = event_indices[source]
-        if selected_target.size == n_steps and selected_source.size == n_steps:
-            return np.arange(self.max_lag, n_steps, dtype=int)
-        target_mask = np.zeros(n_steps, dtype=bool)
-        source_mask = np.zeros(n_steps, dtype=bool)
-        target_mask[selected_target] = True
-        source_mask[selected_source] = True
-        times = np.arange(self.max_lag, n_steps, dtype=int)
-        return times[target_mask[times] & source_mask[times - lag]]
-
-    def _physical_conditioning_set(
-        self,
-        data: np.ndarray,
-        times: np.ndarray,
-        source: int,
-        target: int,
-        lag: int,
-    ) -> np.ndarray:
-        rows = []
-        for past_lag in range(1, self.max_lag + 1):
-            rows.append(data[target, times - past_lag])
-        for past_lag in range(lag + 1, self.max_lag + 1):
-            rows.append(data[source, times - past_lag])
-        for other in range(data.shape[0]):
-            if other in {source, target}:
-                continue
-            for past_lag in range(lag, self.max_lag + 1):
-                rows.append(data[other, times - past_lag])
-        return np.vstack(rows) if rows else np.empty((0, times.size))
-
-    def _fit_physical(
-        self,
-        data: np.ndarray,
-        event_indices: tuple[np.ndarray, ...],
-    ) -> GraphResult:
-        n_nodes, n_steps = data.shape
-        scores_by_lag = np.zeros((self.max_lag, n_nodes, n_nodes), dtype=float)
-        p_values_by_lag = np.ones_like(scores_by_lag)
-        for lag in range(1, self.max_lag + 1):
-            lag_index = lag - 1
-            for source in range(n_nodes):
-                for target in range(n_nodes):
-                    if source == target:
-                        continue
-                    times = self._physical_sample_times(
-                        event_indices, source, target, lag, n_steps
-                    )
-                    if times.size < 2:
-                        continue
-                    x = data[source, times - lag]
-                    y = data[target, times]
-                    z = self._physical_conditioning_set(
-                        data, times, source, target, lag
-                    )
-                    x_res = self._residual(x, z)
-                    y_res = self._residual(y, z)
-                    scores_by_lag[lag_index, source, target] = self._absolute_corr(
-                        x_res, y_res
-                    )
-                    p_values_by_lag[lag_index, source, target] = self._perm_test(
-                        x_res, y_res
-                    )
-        best = np.argmax(scores_by_lag, axis=0)
-        scores = self._at_best_lag(scores_by_lag, best)
-        p_values = self._at_best_lag(p_values_by_lag, best)
-        best_lags = best + 1
-        return self._graph_from_scores(scores, p_values, best_lags, "physical_time_cgc")
 
     @staticmethod
     def _mask_to_event_indices(
@@ -271,71 +485,158 @@ class CausalGranger:
             masked[roi, frames] = data[roi, frames]
         return masked
 
-    def _fit_gcstar(
+    @staticmethod
+    def _validate_segment_ids(segment_ids: np.ndarray, n_steps: int) -> np.ndarray:
+        values = np.asarray(segment_ids, dtype=int)
+        if values.shape != (n_steps,):
+            raise ValueError("segment_ids must contain one value per timepoint")
+        return values
+
+    @staticmethod
+    def _at_best_lag(values: np.ndarray, best: np.ndarray) -> np.ndarray:
+        return np.take_along_axis(values, best[np.newaxis, :, :], axis=0)[0]
+
+    @staticmethod
+    def _candidate_mask(
+        data: np.ndarray,
+        candidate_adjacency: np.ndarray | None,
+    ) -> np.ndarray | None:
+        if candidate_adjacency is None:
+            return None
+        mask = np.asarray(candidate_adjacency, dtype=bool)
+        if mask.shape != (data.shape[0], data.shape[0]):
+            raise ValueError("candidate_adjacency must be square with one row per ROI")
+        mask = mask.copy()
+        np.fill_diagonal(mask, False)
+        return mask
+
+    def rise_flank_candidates(
+        self,
+        representation: np.ndarray,
+    ) -> RiseFlankCandidateResult:
+        """Extract run-filtered rises and shifted-overlap candidate pairs."""
+
+        return rise_flank_candidate_pairs(
+            representation,
+            min_run_samples=self.min_rise_run_samples,
+            max_lag=self.rise_match_max_lag,
+            min_lag=self.rise_match_min_lag,
+            min_overlap_samples=self.rise_match_min_overlap_samples,
+            min_overlap_fraction=self.rise_match_min_overlap_fraction,
+            context_samples=self.rise_run_context_samples,
+        )
+
+    def _method_label(self, physical: bool) -> str:
+        GcStar = _load_gcstar_class()
+        core = GcStar(n_perm=0, n_pasts=1, n_lags=1, method=self.method)
+        base = "cgc_star" if core.method == "fcgc" else "cgc"
+        if physical:
+            return f"segment_aware_{base}"
+        return base
+
+    def _core(self):
+        GcStar = _load_gcstar_class()
+        return GcStar(
+            n_perm=self.n_surrogates,
+            n_pasts=self.n_pasts,
+            n_lags=self.max_lag,
+            temporal=True,
+            method=self.method,
+        )
+
+    def _tested_lags(self) -> np.ndarray:
+        if self.tau is not None:
+            return np.array([self.tau], dtype=int)
+        return np.arange(1, self.max_lag + 1, dtype=int)
+
+    def _fit_core(
         self,
         data: np.ndarray,
         event_indices: tuple[np.ndarray, ...] | None,
+        segment_ids: np.ndarray | None,
+    ):
+        core = self._core()
+        if self.event_mode == "physical" and (
+            event_indices is not None or segment_ids is not None
+        ):
+            return core.fit_event_physical(
+                data,
+                event_indices=event_indices,
+                segment_ids=segment_ids,
+                verbose=0,
+            )
+        if event_indices is not None:
+            return core.fit_event_compressed(data, event_indices, verbose=0)
+        values = (
+            data
+            if event_indices is None
+            else self._mask_to_event_indices(data, event_indices)
+        )
+        return core.fit(values, verbose=0)
+
+    def _graph_from_core(
+        self,
+        core,
+        *,
+        physical: bool,
+        candidate_adjacency: np.ndarray | None = None,
     ) -> GraphResult:
-        values = data if event_indices is None else self._mask_to_event_indices(
-            data, event_indices
+        n_nodes = core.data.shape[0]
+        candidate_mask = self._candidate_mask(core.data, candidate_adjacency)
+        tested_lags = self._tested_lags()
+        lag_rows = np.concatenate(
+            [
+                np.arange(lag * n_nodes, (lag + 1) * n_nodes, dtype=int)
+                for lag in tested_lags
+            ]
         )
-        GcStar = _load_gcstar_class()
-        core = GcStar(
-            n_perm=self.n_surrogates,
-            n_pasts=self.max_lag,
-            n_lags=self.max_lag,
-            temporal=True,
-            method=self.gcstar_method,
-        )
-        core.fit(values, verbose=0)
-        retained = core.get_connectivity_matrix(
-            simulation=self.gcstar_simulation,
-            alpha=self.alpha,
-            beta=self.beta,
-        )
-        retained = np.nan_to_num(retained, nan=0.0)
-        n_nodes = values.shape[0]
-        lag_slice = slice(n_nodes, (self.max_lag + 1) * n_nodes)
         scores_by_lag = np.nan_to_num(
-            core.inv_corr_[lag_slice].reshape(self.max_lag, n_nodes, n_nodes),
+            core.inv_corr_[lag_rows].reshape(tested_lags.size, n_nodes, n_nodes),
             nan=0.0,
         )
         p_values_by_lag = np.nan_to_num(
             np.maximum(
-                core.pVal_corr_[lag_slice],
-                core.pVal_inv_corr_[lag_slice],
-            ).reshape(self.max_lag, n_nodes, n_nodes),
+                core.pVal_corr_[lag_rows],
+                core.pVal_inv_corr_[lag_rows],
+            ).reshape(tested_lags.size, n_nodes, n_nodes),
             nan=1.0,
         )
         best = np.argmax(scores_by_lag, axis=0)
         scores = self._at_best_lag(scores_by_lag, best)
         p_values = self._at_best_lag(p_values_by_lag, best)
-        best_lags = best + 1
-        adjacency = np.asarray(retained > 0.0, dtype=bool)
-        np.fill_diagonal(adjacency, False)
-        np.fill_diagonal(best_lags, 0)
-        method_label = "cgc_star" if core.method == "fcgc" else "cgc"
-        return GraphResult(scores, p_values, adjacency, best_lags, method_label)
-
-    def _graph_from_scores(
-        self,
-        scores: np.ndarray,
-        p_values: np.ndarray,
-        best_lags: np.ndarray,
-        estimator: str,
-    ) -> GraphResult:
+        best_lags = np.take_along_axis(
+            np.broadcast_to(tested_lags[:, None, None], scores_by_lag.shape),
+            best[np.newaxis, :, :],
+            axis=0,
+        )[0]
         if self.n_surrogates:
             adjacency = (
-                benjamini_hochberg(p_values, self.alpha)
+                benjamini_hochberg(
+                    p_values,
+                    self.alpha,
+                    eligible_mask=candidate_mask,
+                )
                 if self.fdr
                 else p_values <= self.alpha
             )
         else:
             adjacency = scores > self.score_threshold
         adjacency = np.asarray(adjacency, dtype=bool)
+        if candidate_mask is not None:
+            adjacency &= candidate_mask
+            scores = np.where(candidate_mask, scores, 0.0)
+            p_values = np.where(candidate_mask, p_values, 1.0)
+            best_lags = np.where(candidate_mask, best_lags, 0)
         np.fill_diagonal(adjacency, False)
         np.fill_diagonal(best_lags, 0)
-        return GraphResult(scores, p_values, adjacency, best_lags, estimator)
+        return GraphResult(
+            scores=scores,
+            p_values=p_values,
+            adjacency=adjacency,
+            best_lags=best_lags,
+            estimator=self._method_label(physical),
+            candidate_adjacency=candidate_mask,
+        )
 
     def fit(
         self,
@@ -344,58 +645,39 @@ class CausalGranger:
         outcomes: np.ndarray | None = None,
         *,
         event_indices: Sequence[np.ndarray] | None = None,
+        candidate_adjacency: np.ndarray | None = None,
     ) -> GraphResult:
-        """Fit by invoking the supplied core implementation.
+        """Fit c-GC/c-GC* on full traces or selected event frames."""
 
-        ``segment_ids`` and ``outcomes`` are retained only to provide explicit
-        errors for formerly advertised extension paths that the supplied
-        implementation does not expose.
-        """
-
-        if segment_ids is not None:
-            raise NotImplementedError(
-                "segment-aware GC is not exposed by core.rising_flanks.RisingFlanks"
-            )
         if outcomes is not None:
+            raise NotImplementedError("cross-representation GC is not implemented")
+        if segment_ids is not None and self.event_mode != "physical":
             raise NotImplementedError(
-                "cross-representation GC is not exposed by core.rising_flanks.RisingFlanks"
+                "segment-aware c-GC/c-GC* requires event_mode='physical'"
             )
 
         data = validate_traces(traces)
         indices = self._indices(data, event_indices)
-        if self.engine == "gcstar":
-            if self.random_state is None:
-                return self._fit_gcstar(data, None if event_indices is None else indices)
-            random_state = np.random.get_state()
-            try:
-                np.random.seed(self.random_state)
-                return self._fit_gcstar(data, None if event_indices is None else indices)
-            finally:
-                np.random.set_state(random_state)
-
-        if self.event_mode == "physical":
-            if self.random_state is None:
-                return self._fit_physical(data, indices)
-            random_state = np.random.get_state()
-            try:
-                np.random.seed(self.random_state)
-                return self._fit_physical(data, indices)
-            finally:
-                np.random.set_state(random_state)
-
-        core = self._fit_core(data, indices)
-        n_nodes = data.shape[0]
-        lag_slice = slice(n_nodes, (self.max_lag + 1) * n_nodes)
-        scores_by_lag = core.inv_corr_[lag_slice].reshape(
-            self.max_lag, n_nodes, n_nodes
+        candidate_mask = self._candidate_mask(data, candidate_adjacency)
+        segments = (
+            None
+            if segment_ids is None
+            else self._validate_segment_ids(segment_ids, data.shape[1])
         )
-        p_values_by_lag = np.maximum(
-            core.pVal_corr_[lag_slice],
-            core.pVal_inv_corr_[lag_slice],
-        ).reshape(self.max_lag, n_nodes, n_nodes)
-        best = np.argmax(scores_by_lag, axis=0)
-        scores = self._at_best_lag(scores_by_lag, best)
-        p_values = self._at_best_lag(p_values_by_lag, best)
-        best_lags = best + 1
-
-        return self._graph_from_scores(scores, p_values, best_lags, "rising_flanks_cgc")
+        physical = self.event_mode == "physical" and (
+            indices is not None or segments is not None
+        )
+        if self.random_state is None:
+            core = self._fit_core(data, indices, segments)
+        else:
+            random_state = np.random.get_state()
+            try:
+                np.random.seed(self.random_state)
+                core = self._fit_core(data, indices, segments)
+            finally:
+                np.random.set_state(random_state)
+        return self._graph_from_core(
+            core,
+            physical=physical,
+            candidate_adjacency=candidate_mask,
+        )

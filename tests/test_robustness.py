@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from calcium_transient_rising_flank.estimators import CausalGranger
+from calcium_transient_rising_flank.estimators import CausalisedGC
 from calcium_transient_rising_flank.pipeline import AnalysisConfig
 from calcium_transient_rising_flank.robustness import (
     SyntheticCondition,
@@ -15,7 +15,10 @@ from calcium_transient_rising_flank.sensitivity import (
     PartialAncestralGraph,
     run_latent_confounding_sensitivity,
 )
-from calcium_transient_rising_flank.validation import simulate_calcium_dataset
+from calcium_transient_rising_flank.validation import (
+    DynamicSimulationConfig,
+    simulate_calcium_dataset,
+)
 
 
 class RobustnessTests(unittest.TestCase):
@@ -40,7 +43,7 @@ class RobustnessTests(unittest.TestCase):
                 SyntheticCondition(name="sampled", gamma=0.8, downsample=2),
             ],
             seeds=[1, 2, 3, 4],
-            estimator_factory=lambda: CausalGranger(max_lag=1),
+            estimator_factory=lambda: CausalisedGC(max_lag=1),
             n_steps=80,
         )
 
@@ -57,6 +60,51 @@ class RobustnessTests(unittest.TestCase):
             ),
             set(),
         )
+
+    def test_synthetic_grid_accepts_dynamic_simulation_condition(self) -> None:
+        dynamic = DynamicSimulationConfig(
+            n_episodes=1,
+            min_rise_length=20,
+            max_rise_length=20,
+            fall_to_rise_ratio_min=2.1,
+            fall_to_rise_ratio_max=2.1,
+            initial_activation_probability=1.0,
+            edge_dropout_probability=0.0,
+            fall_noise_rate=0.1,
+            fall_noise_scale=0.01,
+        )
+
+        runs = run_synthetic_grid(
+            self.truth,
+            conditions=[
+                SyntheticCondition(
+                    name="episodic",
+                    gamma=0.9,
+                    simulator_mode="episodic_dynamic",
+                    dynamic_config=dynamic,
+                )
+            ],
+            seeds=[1, 2],
+            estimator_factory=lambda: CausalisedGC(max_lag=1),
+            n_steps=80,
+        )
+
+        self.assertEqual(len(runs), 2)
+        for run in runs:
+            self.assertIsNotNone(run.dataset.phase_labels)
+            self.assertIsNotNone(run.dataset.propagated_events)
+            self.assertEqual(len(run.dataset.episodes), 1)
+            episode = run.dataset.episodes[0]
+            self.assertEqual(episode.rise_length, 20)
+            self.assertGreater(episode.fall_length, 40)
+            self.assertTrue(
+                np.all(
+                    run.dataset.propagated_events[
+                        :, episode.fall_start : episode.fall_stop
+                    ]
+                    == 0.0
+                )
+            )
 
     def test_analysis_sensitivity_runs_declared_parameter_settings(self) -> None:
         dataset = simulate_calcium_dataset(self.truth, n_steps=100, random_state=2)

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from calcium_transient_rising_flank import (
-    CausalGranger,
+    CausalisedGC,
     build_representations,
     characterize_transients,
     selected_frame_indices,
@@ -19,7 +19,7 @@ def main() -> None:
     traces = np.load(trace_path, allow_pickle=False)
     summary = characterize_transients(traces)
     representations = build_representations(traces, gamma=summary.gamma)
-    estimator = CausalGranger(max_lag=1, n_surrogates=0)
+    estimator = CausalisedGC(max_lag=1, n_surrogates=0)
     print(f"loaded {trace_path.name}: shape={traces.shape}")
     print(f"median estimated gamma={np.median(summary.gamma):.4f}")
     for label in ("rise", "fall", "fall_residual"):

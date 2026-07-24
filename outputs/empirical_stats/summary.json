@@ -1,0 +1,21 @@
+{
+  "input": "outputs/chen_comparison/chen_comparison_rows.csv",
+  "n_input_rows": 37,
+  "n_delta_rows": 102,
+  "n_test_rows": 36,
+  "metric_fields": [
+    "w_ic",
+    "w_rc",
+    "edge_density",
+    "retained_edges",
+    "total_weight",
+    "ipsilateral_weight",
+    "contralateral_weight",
+    "rostrocaudal_weight",
+    "caudorostral_weight"
+  ],
+  "outputs": [
+    "rise_fall_recording_deltas.csv",
+    "paired_signflip_tests.csv"
+  ]
+}

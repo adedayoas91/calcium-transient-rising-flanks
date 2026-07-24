@@ -1,0 +1,10 @@
+{
+  "input_dir": "outputs/motorneurons",
+  "n_rows": 37,
+  "n_summary_rows": 13,
+  "includes_published_chen": true,
+  "outputs": [
+    "chen_comparison_rows.csv",
+    "chen_comparison_summary.csv"
+  ]
+}

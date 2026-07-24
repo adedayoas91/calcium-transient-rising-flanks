@@ -1,0 +1,15 @@
+artifact,category,claim_impact,relative_path,required_for,status
+c-GC summary,static_validation,available for current evidence package,validation_results/cgc/summary.json,saved static synthetic c-GC interpretation,available
+c-GC* summary,static_validation,available for current evidence package,validation_results/cgc_star/summary.json,saved static synthetic c-GC* interpretation,available
+initial dynamic-A summary,dynamic_a_initial,available for current evidence package,validation_results/dynamic_episodic/summary.json,smoke evidence for dynamic-A script,available
+locked dynamic-A summary,dynamic_a_locked,blocks final publication claim,validation_results/dynamic_episodic_locked/summary.json,publication-grade causal-rise versus noncausal-fall claim,missing
+locked dynamic-A representation summary,dynamic_a_locked,blocks final publication claim,validation_results/dynamic_episodic_locked/representation_summary.csv,publication-grade dynamic-A representation comparison,missing
+locked dynamic-A rise/fall contrasts,dynamic_a_locked,blocks final publication claim,validation_results/dynamic_episodic_locked/rise_fall_contrasts.csv,publication-grade dynamic-A rise-minus-comparator claim,missing
+Chen comparison rows,chen_comparison,available for current evidence package,chen_comparison/chen_comparison_rows.csv,row-level empirical metric comparison,available
+Chen comparison summary,chen_comparison,available for current evidence package,chen_comparison/chen_comparison_summary.csv,aggregate empirical metric comparison,available
+representation tradeoff summary,false_positive_tradeoff,available for current evidence package,validation_tradeoffs/representation_tradeoff_summary.csv,recall versus false-positive interpretation,available
+rise tradeoff contrasts,false_positive_tradeoff,available for current evidence package,validation_tradeoffs/rise_tradeoff_contrasts.csv,rise-minus-comparator synthetic interpretation,available
+paired sign-flip tests,empirical_pairing,available for current evidence package,empirical_stats/paired_signflip_tests.csv,paired rise-minus-fall empirical statistics,available
+saved-artifact graph stability summary,graph_stability,available for current evidence package,graph_stability/graph_stability_summary.csv,support and overlap interpretation from saved graphs,available
+empirical null-control contrasts,empirical_null_controls,blocks final publication claim,empirical_null_controls/null_control_contrasts.csv,empirical observed-versus-null claim,missing
+empirical re-estimation stability summary,empirical_stability,blocks final publication claim,empirical_stability/stability_summary.csv,empirical graph stability claim,missing

@@ -1,0 +1,14 @@
+{
+  "input_dir": "outputs/validation_results",
+  "n_rows": 500,
+  "n_summary_rows": 60,
+  "n_contrast_rows": 36,
+  "grid_filenames": [
+    "dynamic_grid_runs.csv",
+    "grid_runs.csv"
+  ],
+  "outputs": [
+    "representation_tradeoff_summary.csv",
+    "rise_tradeoff_contrasts.csv"
+  ]
+}

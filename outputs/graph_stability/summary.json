@@ -1,0 +1,11 @@
+{
+  "input_dir": "outputs/motorneurons",
+  "n_graph_rows": 40,
+  "n_overlap_rows": 13,
+  "n_stability_rows": 16,
+  "outputs": [
+    "graph_support_rows.csv",
+    "representation_overlaps.csv",
+    "graph_stability_summary.csv"
+  ]
+}

@@ -3,10 +3,10 @@
 ## Scope
 
 This pass is restricted to `calcium-transient-rising-flank/`. It aligns the
-testable library with the supplied analysis source: `src/core/rising_flanks.py`
-is the canonical rising/falling-flank c-GC implementation, and
-`src/core/causalised-GC.py` is supporting source only where a required core
-operation is absent.
+testable library with the supplied analysis source: `src/core/causalised-GC.py`
+is the active c-GC/c-GC* implementation, with event-aware extensions that keep
+the old rising-flank selected-frame logic available while adding a physical
+time mode for discontinuous event segments.
 
 ## Baseline Evidence
 
@@ -25,10 +25,10 @@ notebooks nevertheless establish the intended contract: raw traces and
 per-ROI rising/falling frame indices are supplied to the core c-GC analysis.
 Repairs will preserve that contract rather than substitute a new estimator.
 
-Inspection of the typed package found two substitutions that must be removed:
-`MultivariateGranger` implements a new MVGC baseline, and `CausalGranger`
-implements a new residual-correlation learner instead of adapting the
-supplied code.
+Inspection of the typed package found package-owned Granger substitutions that
+must remain out of the estimator path. The retained public adapter is
+`CausalisedGC`, which delegates to modified supplied c-GC/c-GC* code rather
+than implementing a separate Granger learner.
 
 ## Manuscript-Derived Deliverables
 
@@ -37,8 +37,8 @@ supplied code.
 2. Fixed-length signal representations: full, AR(1)-deconvolved, rising, and
    falling traces, plus decay-null falling residuals.
 3. Directed estimation: a thin result-shaping adapter around the supplied
-   rising-flank c-GC implementation; no package-owned bivariate or
-   multivariate Granger implementation.
+   c-GC/c-GC* implementation; no package-owned bivariate or multivariate
+   Granger implementation.
 4. Metrics: `W_IC`, `W_IC_bin`, paired `Delta W_IC`, `W_RC`, edge-recovery,
    and graph-stability summaries.
 5. Validation: synthetic event/calcium generation and cyclic-shift null
@@ -54,19 +54,19 @@ supplied code.
    unsupported extension parameters.
 2. Repair only the invocation/import defects needed to run
    `RisingFlanks.fit_rising` without introducing an alternative GC algorithm.
-3. Reduce `estimators.py` to result shaping around `RisingFlanks`; remove the
-   package-owned MVGC implementation and pipeline execution.
+3. Reduce `estimators.py` to result shaping around `GcStar`; remove
+   package-owned GC/MVGC learner implementations from the pipeline path.
 4. Update package documentation and smoke examples to state the supported
    boundary.
 5. Run imports, unit tests, compilation checks, and a smoke pipeline.
 
 ## Scientific Boundaries
 
-- The supplied c-GC implementation is used as the computational foundation; it
-  does not claim anatomical synapse recovery.
-- Segment-aware GC and cross-representation fall-to-rise GC are not silently
-  recreated in the adapter because they are not exposed by the supplied core
-  API.
+- The supplied c-GC/c-GC* implementation is used as the computational
+  foundation; it does not claim anatomical synapse recovery.
+- Segment-aware physical event mode is implemented inside the supplied
+  c-GC/c-GC* core path for discontinuity handling; cross-representation
+  fall-to-rise GC remains unsupported unless explicitly added later.
 - No bivariate or multivariate GC baseline is implemented in this package.
 - Optional latent-confounding-aware algorithms such as LPCMCI and SVAR-FCI are
   represented by an adapter boundary only unless their dependencies and

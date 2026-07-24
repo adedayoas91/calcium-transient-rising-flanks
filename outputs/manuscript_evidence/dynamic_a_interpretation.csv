@@ -1,0 +1,1 @@
+method,event_mode,condition,comparator,n,delta_precision,delta_recall,delta_false_positive_rate,delta_f1,delta_orientation_accuracy,delta_edge_density,comparator_truth_edges_mean,comparator_fall_propagated_total_mean,evidence_strength,manuscript_use

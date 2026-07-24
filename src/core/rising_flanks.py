@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-"""Supplied rising-flank c-GC implementation.
+"""Legacy supplied rising-flank c-GC implementation.
 
-This source is retained as the canonical estimator implementation. The edits
-in this module repair invocation and optional-import defects required to run
-the supplied ``fit_rising`` path from the package adapter.
+This source is retained for old-notebook compatibility and parity checks
+against the compressed event mode in ``causalised-GC.py``.
 """
 
 import logging

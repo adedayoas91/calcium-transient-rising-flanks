@@ -1,0 +1,39 @@
+{
+  "output_root": "outputs",
+  "n_chen_rows": 13,
+  "n_empirical_pairing_rows": 20,
+  "n_synthetic_tradeoff_rows": 26,
+  "n_dynamic_a_interpretation_rows": 0,
+  "n_graph_support_rows": 16,
+  "n_hindbrain_graph_support_rows": 4,
+  "n_empirical_null_interpretation_rows": 0,
+  "n_empirical_stability_interpretation_rows": 0,
+  "n_missing_publication_gates": 5,
+  "figure_outputs": [
+    "empirical_metric_summary.png",
+    "synthetic_tradeoff_summary.png",
+    "chen_comparison_summary.png",
+    "representative_network_case_c.png",
+    "graph_support_summary.png",
+    "evidence_gate_status.png"
+  ],
+  "outputs": [
+    "chen_interpretation_table.csv",
+    "empirical_pairing_interpretation.csv",
+    "synthetic_tradeoff_interpretation.csv",
+    "dynamic_a_interpretation.csv",
+    "graph_support_interpretation.csv",
+    "empirical_null_interpretation.csv",
+    "empirical_stability_interpretation.csv",
+    "evidence_gates.csv",
+    "figure_manifest.csv",
+    "manuscript_evidence_report.md",
+    "manuscript_results_snippets.tex",
+    "empirical_metric_summary.png",
+    "synthetic_tradeoff_summary.png",
+    "chen_comparison_summary.png",
+    "representative_network_case_c.png",
+    "graph_support_summary.png",
+    "evidence_gate_status.png"
+  ]
+}

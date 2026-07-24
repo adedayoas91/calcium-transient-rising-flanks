@@ -7,11 +7,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .estimators import CausalGranger
+from .estimators import CausalisedGC
 from .pipeline import AnalysisConfig, PipelineResult, run_pipeline
 from .validation import (
+    DynamicSimulationConfig,
     RepresentationValidation,
     SyntheticDataset,
+    SyntheticEpisode,
     simulate_calcium_dataset,
     validate_representations,
 )
@@ -28,6 +30,8 @@ class SyntheticCondition:
     spontaneous_rate: float = 0.025
     transmission_probability: float = 0.8
     downsample: int = 1
+    simulator_mode: str = "static"
+    dynamic_config: DynamicSimulationConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -55,11 +59,44 @@ def downsample_dataset(dataset: SyntheticDataset, factor: int) -> SyntheticDatas
         raise ValueError("factor must be a positive integer")
     if factor == 1:
         return dataset
+    episodes = tuple(
+        SyntheticEpisode(
+            rise_start=episode.rise_start // factor,
+            rise_stop=(episode.rise_stop + factor - 1) // factor,
+            fall_start=episode.fall_start // factor,
+            fall_stop=(episode.fall_stop + factor - 1) // factor,
+            adjacency=episode.adjacency.copy(),
+            active_nodes=None
+            if episode.active_nodes is None
+            else episode.active_nodes.copy(),
+        )
+        for episode in dataset.episodes
+    )
     return SyntheticDataset(
         adjacency=dataset.adjacency.copy(),
         events=dataset.events[:, ::factor],
         calcium=dataset.calcium[:, ::factor],
         fluorescence=dataset.fluorescence[:, ::factor],
+        phase_labels=None
+        if dataset.phase_labels is None
+        else dataset.phase_labels[::factor],
+        episodes=episodes,
+        propagated_events=None
+        if dataset.propagated_events is None
+        else dataset.propagated_events[:, ::factor],
+        rise_adjacencies=tuple(graph.copy() for graph in dataset.rise_adjacencies),
+        edge_presence_counts=None
+        if dataset.edge_presence_counts is None
+        else dataset.edge_presence_counts.copy(),
+        edge_prevalence=None
+        if dataset.edge_prevalence is None
+        else dataset.edge_prevalence.copy(),
+        node_presence_counts=None
+        if dataset.node_presence_counts is None
+        else dataset.node_presence_counts.copy(),
+        node_prevalence=None
+        if dataset.node_prevalence is None
+        else dataset.node_prevalence.copy(),
     )
 
 
@@ -72,7 +109,7 @@ def run_synthetic_grid(
     adjacency: np.ndarray,
     conditions: Iterable[SyntheticCondition],
     seeds: Iterable[int],
-    estimator_factory: Callable[[], CausalGranger],
+    estimator_factory: Callable[[], CausalisedGC],
     n_steps: int = 1000,
     tolerance: float | np.ndarray = 0.0,
 ) -> tuple[SyntheticGridRun, ...]:
@@ -96,6 +133,8 @@ def run_synthetic_grid(
                 spontaneous_rate=condition.spontaneous_rate,
                 transmission_probability=condition.transmission_probability,
                 random_state=seed,
+                simulator_mode=condition.simulator_mode,
+                dynamic_config=condition.dynamic_config,
             )
             sampled = downsample_dataset(dataset, condition.downsample)
             validation = validate_representations(

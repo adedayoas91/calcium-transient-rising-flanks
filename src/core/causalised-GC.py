@@ -71,7 +71,7 @@ def regression_residual(x: np.ndarray, z: np.ndarray) -> np.ndarray:
     if z.ndim == 1:
         z = z[np.newaxis, :]
 
-    design = np.vstack([z, np.ones(z.shape[1])]).T
+    design = np.column_stack([np.ones(x.size), z.T])
     coef, *_ = np.linalg.lstsq(design, x, rcond=None)
     fitted = design @ coef
     return x - fitted
@@ -206,6 +206,232 @@ class GcStar:
                 pvals[i, j] = _perm_test_numba(x_res, y_res, self.n_perm)
 
         return inv_corr, pvals
+
+    @staticmethod
+    def _safe_abs_corr(x: np.ndarray, y: np.ndarray) -> float:
+        if x.size < 2 or y.size < 2 or np.std(x) == 0.0 or np.std(y) == 0.0:
+            return 0.0
+        value = np.corrcoef(x, y)[1, 0]
+        return 0.0 if not np.isfinite(value) else float(abs(value))
+
+    def _safe_perm_test(self, x: np.ndarray, y: np.ndarray) -> float:
+        if (
+            self.n_perm <= 0
+            or x.size < 2
+            or y.size < 2
+            or np.std(x) == 0.0
+            or np.std(y) == 0.0
+        ):
+            return 1.0
+        return float(_perm_test_numba(x, y, self.n_perm))
+
+    @staticmethod
+    def _normalise_event_indices(
+        event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None,
+        n_nodes: int,
+        n_steps: int,
+    ) -> tuple[np.ndarray, ...]:
+        if event_indices is None:
+            all_frames = np.arange(n_steps, dtype=int)
+            return tuple(all_frames.copy() for _ in range(n_nodes))
+        if len(event_indices) != n_nodes:
+            raise ValueError("event_indices must contain one frame list per ROI.")
+        normalised = []
+        for frames in event_indices:
+            values = np.asarray(frames, dtype=int)
+            if np.any(values < 0) or np.any(values >= n_steps):
+                raise ValueError("event_indices include an out-of-range frame.")
+            normalised.append(np.unique(values))
+        return tuple(normalised)
+
+    @staticmethod
+    def _normalise_segment_ids(
+        segment_ids: np.ndarray | None,
+        n_steps: int,
+    ) -> np.ndarray | None:
+        if segment_ids is None:
+            return None
+        values = np.asarray(segment_ids, dtype=int)
+        if values.shape != (n_steps,):
+            raise ValueError("segment_ids must contain one value per timepoint.")
+        return values
+
+    def _physical_sample_times(
+        self,
+        event_indices: tuple[np.ndarray, ...],
+        source: int,
+        target: int,
+        lag: int,
+        n_steps: int,
+        segment_ids: np.ndarray | None,
+    ) -> np.ndarray:
+        target_mask = np.zeros(n_steps, dtype=bool)
+        source_mask = np.zeros(n_steps, dtype=bool)
+        target_mask[event_indices[target]] = True
+        source_mask[event_indices[source]] = True
+        times = np.arange(max(self.n_pasts, lag), n_steps, dtype=int)
+        valid = target_mask[times] & source_mask[times - lag]
+        if segment_ids is not None:
+            valid &= segment_ids[times] >= 0
+            valid &= segment_ids[times - lag] >= 0
+            valid &= segment_ids[times] == segment_ids[times - lag]
+        return times[valid]
+
+    def _shifted_rows_at_times(self, data: np.ndarray, times: np.ndarray) -> np.ndarray:
+        rows = [data[:, times]]
+        for lag in range(1, self.n_pasts + 1):
+            rows.append(data[:, times - lag])
+        return np.vstack(rows)
+
+    def _physical_conditioning_set(
+        self,
+        shifted: np.ndarray,
+        row_index: int,
+        target: int,
+    ) -> np.ndarray:
+        if self.method == "fcgc":
+            excluded = np.array([row_index, target], dtype=int)
+            return np.delete(shifted, np.unique(excluded), axis=0)
+
+        return self._rising_flank_conditioning_set(shifted, row_index, target)
+
+    def _rising_flank_conditioning_set(
+        self,
+        shifted: np.ndarray,
+        row_index: int,
+        target: int,
+    ) -> np.ndarray:
+        """Condition using the original rising-flank c-GC variable logic."""
+
+        source = row_index % self.n_neur
+        source_lag = row_index // self.n_neur
+        rows: list[int] = []
+        for lag in range(source_lag + 1, self.n_pasts + 1):
+            rows.append(lag * self.n_neur + source)
+        for lag in range(1, self.n_pasts + 1):
+            rows.append(lag * self.n_neur + target)
+        for other in range(self.n_neur):
+            if other in {source, target}:
+                continue
+            for lag in range(source_lag, self.n_pasts + 1):
+                rows.append(lag * self.n_neur + other)
+        if not rows:
+            return np.empty((0, shifted.shape[1]))
+        return shifted[np.asarray(rows, dtype=int)]
+
+    def fit_event_compressed(
+        self,
+        data: np.ndarray,
+        event_indices: tuple[np.ndarray, ...] | list[np.ndarray],
+        verbose: int = 0,
+    ) -> "GcStar":
+        """Fit modified c-GC/c-GC* using old selected-frame compression logic."""
+
+        self.data = data.copy()
+        self.n_neur = data.shape[0]
+        self._configure_logging(verbose)
+        selected = self._normalise_event_indices(
+            event_indices, self.n_neur, data.shape[1]
+        )
+        n_rows = (self.n_pasts + 1) * self.n_neur
+        corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_corr = np.ones((n_rows, self.n_neur), dtype=float)
+        inv_corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_inv = np.ones((n_rows, self.n_neur), dtype=float)
+
+        for row_index in range(n_rows):
+            source = row_index % self.n_neur
+            for target in range(self.n_neur):
+                common = np.intersect1d(selected[source], selected[target])
+                if common.size <= self.n_pasts + 1:
+                    continue
+                shifted = self.shift_data(data[:, common])
+                if shifted.shape[1] < 2:
+                    continue
+                x = shifted[row_index]
+                y = shifted[target]
+                corr[row_index, target] = self._safe_abs_corr(x, y)
+                p_corr[row_index, target] = self._safe_perm_test(x, y)
+                z = self._physical_conditioning_set(shifted, row_index, target)
+                x_res = regression_residual(x, z)
+                y_res = regression_residual(y, z)
+                inv_corr[row_index, target] = self._safe_abs_corr(x_res, y_res)
+                p_inv[row_index, target] = self._safe_perm_test(x_res, y_res)
+
+        self.corr_, self.pVal_corr_ = corr, p_corr
+        self.inv_corr_, self.pVal_inv_corr_ = inv_corr, p_inv
+        return self
+
+    def physical_event_correlation_func(
+        self,
+        data: np.ndarray,
+        event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None = None,
+        segment_ids: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Compute modified c-GC/c-GC* on valid physical event-lag samples.
+
+        Unlike event-compressed analyses, this only evaluates source-target
+        samples where target time ``t`` and source time ``t-lag`` are selected
+        on the original time axis. When ``segment_ids`` is provided, both times
+        must also belong to the same non-negative segment, preventing lag pairs
+        from crossing transient or episode boundaries.
+        """
+
+        self.n_neur = data.shape[0]
+        selected = self._normalise_event_indices(
+            event_indices, self.n_neur, data.shape[1]
+        )
+        segments = self._normalise_segment_ids(segment_ids, data.shape[1])
+        n_rows = (self.n_pasts + 1) * self.n_neur
+        corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_corr = np.ones((n_rows, self.n_neur), dtype=float)
+        inv_corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_inv = np.ones((n_rows, self.n_neur), dtype=float)
+
+        for lag in range(self.n_pasts + 1):
+            for source in range(self.n_neur):
+                row_index = lag * self.n_neur + source
+                for target in range(self.n_neur):
+                    times = self._physical_sample_times(
+                        selected, source, target, lag, data.shape[1], segments
+                    )
+                    if times.size < 2:
+                        continue
+                    shifted = self._shifted_rows_at_times(data, times)
+                    x = shifted[row_index]
+                    y = shifted[target]
+                    corr[row_index, target] = self._safe_abs_corr(x, y)
+                    p_corr[row_index, target] = self._safe_perm_test(x, y)
+                    z = self._physical_conditioning_set(shifted, row_index, target)
+                    x_res = regression_residual(x, z)
+                    y_res = regression_residual(y, z)
+                    inv_corr[row_index, target] = self._safe_abs_corr(x_res, y_res)
+                    p_inv[row_index, target] = self._safe_perm_test(x_res, y_res)
+        return corr, p_corr, inv_corr, p_inv
+
+    def fit_event_physical(
+        self,
+        data: np.ndarray,
+        event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None = None,
+        segment_ids: np.ndarray | None = None,
+        verbose: int = 0,
+    ) -> "GcStar":
+        """Fit modified c-GC/c-GC* while preserving physical event lags."""
+
+        self.data = data.copy()
+        self.shifted_data = self.shift_data(self.data)
+        self._configure_logging(verbose)
+        (
+            self.corr_,
+            self.pVal_corr_,
+            self.inv_corr_,
+            self.pVal_inv_corr_,
+        ) = self.physical_event_correlation_func(
+            self.data,
+            event_indices=event_indices,
+            segment_ids=segment_ids,
+        )
+        return self
 
     def fit(self, data: np.ndarray, verbose: int = 0) -> "GcStar":
         """Fit the estimator on an array of shape ``(n_variables, T)``."""
