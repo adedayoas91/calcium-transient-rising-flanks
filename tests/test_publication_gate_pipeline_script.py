@@ -63,11 +63,13 @@ class PublicationGatePipelineScriptTests(unittest.TestCase):
             rise_match_max_lag=4,
             rise_match_min_overlap_samples=6,
             rise_run_context_samples=5,
+            resume_dynamic=True,
         )
         steps = script.build_steps(config)
         dynamic = steps[0].command
 
         self.assertIn("--rise-candidate-filter", dynamic)
+        self.assertIn("--resume", dynamic)
         self.assertIn("--tau", dynamic)
         self.assertIn("--n-pasts", dynamic)
         self.assertIn("2", dynamic)

@@ -132,6 +132,11 @@ while fall and fall-residual representations are scored against zero truth.
 The raw rows, summaries, and contrasts include the selected method label so
 c-GC and c-GC* locked runs can be kept separate. Use `--method cgc` for a
 single-method run or `--methods cgc,cgc-star` for one combined output set.
+If a dynamic validation run is interrupted, rerun the same command with
+`--resume`. The script reuses complete method/event-mode/condition/seed units
+from `dynamic_grid_runs.csv`, reruns missing or incomplete units, and refreshes
+the summary files. The publication-gate wrapper exposes the same behavior with
+`--resume-dynamic`.
 
 Run all remaining publication-gate jobs and then refresh the readiness,
 manuscript evidence, and TODO completion packages:

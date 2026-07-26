@@ -43,6 +43,45 @@ SUMMARY_METRICS = (
 )
 METHOD_CHOICES = ("cgc", "fcgc", "cgc-star", "cgc*")
 TOPOLOGY_CHOICES = ("sequence", "generated")
+GRID_RUNS_CSV = "dynamic_grid_runs.csv"
+REPRESENTATION_SUMMARY_CSV = "representation_summary.csv"
+RISE_FALL_CONTRASTS_CSV = "rise_fall_contrasts.csv"
+SUMMARY_JSON = "summary.json"
+RESUME_STATE_JSON = "resume_state.json"
+REPRESENTATION_ORDER = ("full", "deconvolved", "rise", "fall", "fall_residual")
+EXPECTED_REPRESENTATIONS = frozenset(REPRESENTATION_ORDER)
+RESUME_KEY_COLUMNS = ("method", "event_mode", "condition", "seed")
+RESUME_AXIS_CONFIG_KEYS = {"event_modes", "methods", "method", "n_seeds"}
+INTEGER_ROW_COLUMNS = {
+    "seed",
+    "true_positives",
+    "false_positives",
+    "false_negatives",
+    "truth_edges",
+    "n_episodes",
+    "min_rise_length",
+    "rise_waveform_length",
+    "edge_presence_total",
+    "node_presence_total",
+    "active_union_nodes",
+    "rise_candidate_edges",
+    "rise_candidate_matches",
+    "rise_candidate_retained_runs",
+    "rise_candidate_dropped_runs",
+    "rise_candidate_retained_frames",
+    "rise_candidate_context_frames",
+}
+FLOAT_ROW_COLUMNS = set(SUMMARY_METRICS) | {
+    "precision",
+    "recall",
+    "false_positive_rate",
+    "f1",
+    "orientation_accuracy",
+    "edge_density",
+    "min_fall_to_rise",
+    "fall_initial_scale",
+    "fall_initial_ceiling_fraction",
+}
 
 
 def _env_int(name: str, default: int) -> int:
@@ -62,7 +101,9 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def _env_optional_int(name: str) -> int | None:
     value = os.environ.get(name)
-    return None if value in {None, ""} else int(value)
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 def _parse_event_modes(value: str) -> tuple[str, ...]:
@@ -116,7 +157,7 @@ def _active_node_sequence() -> tuple[np.ndarray, ...]:
 
 def _edge_density(adjacency: np.ndarray) -> float:
     values = np.asarray(adjacency, dtype=bool)
-    off_diag = ~np.eye(values.shape[0], dtype=bool)
+    off_diag: np.ndarray = ~np.eye(values.shape[0], dtype=bool)
     return float(np.count_nonzero(values[off_diag]) / np.count_nonzero(off_diag))
 
 
@@ -325,7 +366,11 @@ def _summary_rows(
             "n": len(values),
         }
         for metric in SUMMARY_METRICS:
-            samples = [row.get(metric) for row in values if row.get(metric) is not None]
+            samples = [
+                float(value)
+                for row in values
+                if (value := row.get(metric)) is not None
+            ]
             entry[f"{metric}_mean"] = float(np.mean(samples)) if samples else None
         summaries.append(entry)
     return summaries
@@ -402,10 +447,203 @@ def _write_csv(path: Path, rows: list[dict[str, float | int | str | None]]) -> N
     if not rows:
         path.write_text("")
         return
+    fieldnames = list(rows[0].keys())
+    for row in rows[1:]:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
     with path.open("w", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _coerce_grid_row(
+    row: dict[str, str | None],
+) -> dict[str, float | int | str | None]:
+    coerced: dict[str, float | int | str | None] = {}
+    for key, value in row.items():
+        if value is None or value == "":
+            coerced[key] = None
+        elif key in INTEGER_ROW_COLUMNS:
+            coerced[key] = int(value)
+        elif key in FLOAT_ROW_COLUMNS:
+            coerced[key] = float(value)
+        else:
+            coerced[key] = value
+    return coerced
+
+
+def _read_grid_rows(path: Path) -> list[dict[str, float | int | str | None]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    with path.open(newline="") as file:
+        return [_coerce_grid_row(row) for row in csv.DictReader(file)]
+
+
+def _row_run_key(row: dict[str, float | int | str | None]) -> tuple[str, str, str, int]:
+    method = row.get("method")
+    event_mode = row.get("event_mode")
+    condition = row.get("condition")
+    seed = row.get("seed")
+    if method is None or event_mode is None or condition is None or seed is None:
+        values = {
+            "method": method,
+            "event_mode": event_mode,
+            "condition": condition,
+            "seed": seed,
+        }
+        missing = [column for column, value in values.items() if value is None]
+        raise ValueError(
+            "resume grid row is missing required columns: " + ", ".join(missing)
+        )
+    return (
+        str(method),
+        str(event_mode),
+        str(condition),
+        int(seed),
+    )
+
+
+def _run_key(
+    method: str,
+    event_mode: str,
+    condition: SyntheticCondition,
+    seed: int,
+) -> tuple[str, str, str, int]:
+    return (method, event_mode, condition.name, seed)
+
+
+def _complete_grid_rows(
+    rows: list[dict[str, float | int | str | None]],
+) -> list[dict[str, float | int | str | None]]:
+    ordered_keys: list[tuple[str, str, str, int]] = []
+    grouped: dict[
+        tuple[str, str, str, int], dict[str, dict[str, float | int | str | None]]
+    ] = {}
+    for row in rows:
+        key = _row_run_key(row)
+        representation = row.get("representation")
+        if representation is None:
+            raise ValueError("resume grid row is missing required column: representation")
+        if key not in grouped:
+            grouped[key] = {}
+            ordered_keys.append(key)
+        grouped[key][str(representation)] = row
+
+    complete: list[dict[str, float | int | str | None]] = []
+    for key in ordered_keys:
+        representation_rows = grouped[key]
+        if not EXPECTED_REPRESENTATIONS.issubset(representation_rows):
+            continue
+        complete.extend(
+            representation_rows[representation]
+            for representation in REPRESENTATION_ORDER
+        )
+    return complete
+
+
+def _completed_run_keys(
+    rows: list[dict[str, float | int | str | None]],
+) -> set[tuple[str, str, str, int]]:
+    return {_row_run_key(row) for row in _complete_grid_rows(rows)}
+
+
+def _jsonable(value):
+    if isinstance(value, tuple):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _jsonable(item) for key, item in value.items()}
+    return value
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    temporary = path.with_name(f"{path.name}.tmp")
+    with temporary.open("w") as file:
+        json.dump(_jsonable(payload), file, indent=2)
+        file.write("\n")
+    temporary.replace(path)
+
+
+def _resume_signature(
+    config: dict[str, float | int | str | tuple[str, ...] | None | bool],
+) -> dict:
+    return {
+        key: _jsonable(value)
+        for key, value in config.items()
+        if key not in RESUME_AXIS_CONFIG_KEYS
+    }
+
+
+def _load_resume_signature(output_dir: Path) -> dict | None:
+    state_path = output_dir / RESUME_STATE_JSON
+    if state_path.exists():
+        try:
+            with state_path.open() as file:
+                state = json.load(file)
+        except json.JSONDecodeError:
+            state = {}
+        signature = state.get("config_signature")
+        if isinstance(signature, dict):
+            return signature
+
+    summary_path = output_dir / SUMMARY_JSON
+    if not summary_path.exists():
+        return None
+    try:
+        with summary_path.open() as file:
+            summary = json.load(file)
+    except json.JSONDecodeError:
+        return None
+    config = summary.get("config")
+    if not isinstance(config, dict):
+        return None
+    return _resume_signature(config)
+
+
+def _validate_resume_signature(
+    output_dir: Path,
+    current_signature: dict,
+) -> None:
+    existing_signature = _load_resume_signature(output_dir)
+    if existing_signature is None:
+        return
+    shared_keys = set(existing_signature).intersection(current_signature)
+    mismatches = [
+        key
+        for key in sorted(shared_keys)
+        if existing_signature[key] != current_signature[key]
+    ]
+    if mismatches:
+        details = "; ".join(
+            (
+                f"{key}: existing={existing_signature[key]!r}, "
+                f"requested={current_signature[key]!r}"
+            )
+            for key in mismatches
+        )
+        raise ValueError(
+            "cannot resume dynamic validation with different run settings: " + details
+        )
+
+
+def _write_resume_state(
+    output_dir: Path,
+    *,
+    config_signature: dict,
+    total_units: int,
+    completed_units: int,
+    status: str,
+) -> None:
+    _write_json(
+        output_dir / RESUME_STATE_JSON,
+        {
+            "status": status,
+            "completed_units": completed_units,
+            "total_units": total_units,
+            "config_signature": config_signature,
+        },
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -414,6 +652,14 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=Path("outputs/validation_results/dynamic_episodic"),
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "reuse complete method/event/condition/seed rows from dynamic_grid_runs.csv "
+            "and run only missing or incomplete simulation units"
+        ),
     )
     parser.add_argument("--n-seeds", type=int, default=_env_int("RF_DYNAMIC_N_SEEDS", 5))
     parser.add_argument(
@@ -613,6 +859,49 @@ def _dynamic_config_from_args(
     )
 
 
+def _summary_config(
+    args: argparse.Namespace,
+    dynamic_config: DynamicSimulationConfig,
+    event_modes: tuple[str, ...],
+    methods: tuple[str, ...],
+) -> dict[str, float | int | str | tuple[str, ...] | None | bool]:
+    return {
+        "n_seeds": args.n_seeds,
+        "n_steps": args.n_steps,
+        "event_modes": event_modes,
+        "max_lag": args.max_lag,
+        "tau": args.tau,
+        "n_pasts": args.n_pasts,
+        "n_surrogates": args.n_surrogates,
+        "score_threshold": args.score_threshold,
+        "no_fdr": args.no_fdr,
+        "methods": methods,
+        "method": methods[0] if len(methods) == 1 else None,
+        "dynamic_episodes": args.dynamic_episodes,
+        "topology_mode": args.topology_mode,
+        "min_rise_length": args.min_rise_length,
+        "max_rise_length": args.max_rise_length,
+        "rise_waveform_length": args.rise_waveform_length,
+        "fall_state_mode": args.fall_state_mode,
+        "fall_initial_scale": args.fall_initial_scale,
+        "fall_initial_ceiling_fraction": args.fall_initial_ceiling_fraction,
+        "edge_dropout_probability": dynamic_config.edge_dropout_probability,
+        "edge_addition_probability": dynamic_config.edge_addition_probability,
+        "source_dropout_probability": dynamic_config.source_dropout_probability,
+        "source_recruitment_probability": dynamic_config.source_recruitment_probability,
+        "source_recruitment_edge_probability": (
+            dynamic_config.source_recruitment_edge_probability
+        ),
+        "min_rise_run_samples": args.min_rise_run_samples,
+        "rise_candidate_filter": args.rise_candidate_filter,
+        "rise_match_min_lag": args.rise_match_min_lag,
+        "rise_match_max_lag": args.rise_match_max_lag,
+        "rise_match_min_overlap_samples": args.rise_match_min_overlap_samples,
+        "rise_match_min_overlap_fraction": args.rise_match_min_overlap_fraction,
+        "rise_run_context_samples": args.rise_run_context_samples,
+    }
+
+
 def main() -> None:
     args = parse_args()
     event_modes = _parse_event_modes(args.event_modes)
@@ -629,71 +918,107 @@ def main() -> None:
         ),
     )
     seeds = tuple(range(1, args.n_seeds + 1))
+    if not seeds:
+        raise ValueError("n_seeds must be positive")
+    config = _summary_config(args, dynamic_config, event_modes, methods)
+    run_specs: list[tuple[str, str, SyntheticCondition, int]] = [
+        (method, mode, condition, seed)
+        for method in methods
+        for mode in event_modes
+        for condition in conditions
+        for seed in seeds
+    ]
+    target_keys = {
+        _run_key(method, mode, condition, seed)
+        for method, mode, condition, seed in run_specs
+    }
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    grid_path = args.output_dir / GRID_RUNS_CSV
     rows: list[dict[str, float | int | str | None]] = []
-    for method in methods:
-        for mode in event_modes:
+    completed_keys: set[tuple[str, str, str, int]] = set()
+    skipped_units = 0
+    if args.resume:
+        config_signature = _resume_signature(config)
+        _validate_resume_signature(args.output_dir, config_signature)
+        existing_rows = _complete_grid_rows(_read_grid_rows(grid_path))
+        rows = [row for row in existing_rows if _row_run_key(row) in target_keys]
+        completed_keys = _completed_run_keys(rows)
+        skipped_units = len(completed_keys)
+        _write_resume_state(
+            args.output_dir,
+            config_signature=config_signature,
+            total_units=len(run_specs),
+            completed_units=len(completed_keys),
+            status="running",
+        )
+
+    if args.resume:
+        for method, mode, condition, seed in run_specs:
+            key = _run_key(method, mode, condition, seed)
+            if key in completed_keys:
+                continue
             rows.extend(
                 _rows_for_mode(
                     adjacency=adjacency,
-                    conditions=conditions,
-                    seeds=seeds,
+                    conditions=(condition,),
+                    seeds=(seed,),
                     method=method,
                     event_mode=mode,
                     args=args,
                 )
             )
+            completed_keys.add(key)
+            _write_csv(grid_path, rows)
+            _write_resume_state(
+                args.output_dir,
+                config_signature=config_signature,
+                total_units=len(run_specs),
+                completed_units=len(completed_keys),
+                status="running",
+            )
+    else:
+        for method in methods:
+            for mode in event_modes:
+                rows.extend(
+                    _rows_for_mode(
+                        adjacency=adjacency,
+                        conditions=conditions,
+                        seeds=seeds,
+                        method=method,
+                        event_mode=mode,
+                        args=args,
+                    )
+                )
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     summary_rows = _summary_rows(rows)
     contrast_rows = _contrast_rows(summary_rows)
-    _write_csv(args.output_dir / "dynamic_grid_runs.csv", rows)
-    _write_csv(args.output_dir / "representation_summary.csv", summary_rows)
-    _write_csv(args.output_dir / "rise_fall_contrasts.csv", contrast_rows)
+    _write_csv(grid_path, rows)
+    _write_csv(args.output_dir / REPRESENTATION_SUMMARY_CSV, summary_rows)
+    _write_csv(args.output_dir / RISE_FALL_CONTRASTS_CSV, contrast_rows)
 
     summary = {
-        "config": {
-            "n_seeds": args.n_seeds,
-            "n_steps": args.n_steps,
-            "event_modes": event_modes,
-            "max_lag": args.max_lag,
-            "tau": args.tau,
-            "n_pasts": args.n_pasts,
-            "n_surrogates": args.n_surrogates,
-            "score_threshold": args.score_threshold,
-            "methods": methods,
-            "method": methods[0] if len(methods) == 1 else None,
-            "dynamic_episodes": args.dynamic_episodes,
-            "topology_mode": args.topology_mode,
-            "min_rise_length": args.min_rise_length,
-            "max_rise_length": args.max_rise_length,
-            "rise_waveform_length": args.rise_waveform_length,
-            "fall_state_mode": args.fall_state_mode,
-            "fall_initial_scale": args.fall_initial_scale,
-            "fall_initial_ceiling_fraction": args.fall_initial_ceiling_fraction,
-            "edge_dropout_probability": dynamic_config.edge_dropout_probability,
-            "edge_addition_probability": dynamic_config.edge_addition_probability,
-            "source_dropout_probability": dynamic_config.source_dropout_probability,
-            "source_recruitment_probability": (
-                dynamic_config.source_recruitment_probability
-            ),
-            "source_recruitment_edge_probability": (
-                dynamic_config.source_recruitment_edge_probability
-            ),
-            "min_rise_run_samples": args.min_rise_run_samples,
-            "rise_candidate_filter": args.rise_candidate_filter,
-            "rise_match_min_lag": args.rise_match_min_lag,
-            "rise_match_max_lag": args.rise_match_max_lag,
-            "rise_match_min_overlap_samples": args.rise_match_min_overlap_samples,
-            "rise_match_min_overlap_fraction": args.rise_match_min_overlap_fraction,
-            "rise_run_context_samples": args.rise_run_context_samples,
-        },
+        "config": config,
         "rows": len(rows),
         "means": _summary_mapping(rows),
         "contrasts": contrast_rows,
     }
-    with (args.output_dir / "summary.json").open("w") as file:
-        json.dump(summary, file, indent=2)
-        file.write("\n")
+    _write_json(args.output_dir / SUMMARY_JSON, summary)
+
+    if args.resume:
+        _write_resume_state(
+            args.output_dir,
+            config_signature=config_signature,
+            total_units=len(run_specs),
+            completed_units=len(completed_keys),
+            status="complete",
+        )
+        print(
+            f"wrote {len(rows)} rows to {args.output_dir} "
+            f"(resumed {skipped_units} completed units; "
+            f"ran {len(run_specs) - skipped_units} units)"
+        )
+        return
 
     print(f"wrote {len(rows)} rows to {args.output_dir}")
 

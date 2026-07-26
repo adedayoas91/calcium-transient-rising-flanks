@@ -1,6 +1,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import numpy as np
@@ -194,6 +195,56 @@ class DynamicEpisodicValidationScriptTests(unittest.TestCase):
         self.assertEqual(metadata["rise_candidate_context_frames"], 15)
         self.assertAlmostEqual(metadata["rise_candidate_mean_overlap"], 0.625)
         self.assertIsNone(fall_metadata["rise_candidate_edges"])
+
+    def test_resume_completion_keeps_only_complete_simulation_units(self) -> None:
+        script = _load_script_module()
+
+        def row(seed: int, representation: str):
+            return {
+                "method": "cgc",
+                "event_mode": "compressed",
+                "condition": "dynamic_a_noncausal_fall",
+                "seed": seed,
+                "representation": representation,
+                "precision": 0.5,
+            }
+
+        rows = [row(1, representation) for representation in script.REPRESENTATION_ORDER]
+        rows.extend([row(2, "full"), row(2, "rise")])
+
+        complete_rows = script._complete_grid_rows(rows)
+        completed_keys = script._completed_run_keys(rows)
+
+        self.assertEqual(len(complete_rows), len(script.REPRESENTATION_ORDER))
+        self.assertEqual(
+            [row["representation"] for row in complete_rows],
+            list(script.REPRESENTATION_ORDER),
+        )
+        self.assertEqual(
+            completed_keys,
+            {("cgc", "compressed", "dynamic_a_noncausal_fall", 1)},
+        )
+
+    def test_resume_signature_rejects_changed_run_settings(self) -> None:
+        script = _load_script_module()
+
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            script._write_resume_state(
+                output_dir,
+                config_signature={"n_steps": 240, "score_threshold": 0.1},
+                total_units=2,
+                completed_units=1,
+                status="running",
+            )
+
+            script._validate_resume_signature(
+                output_dir, {"n_steps": 240, "score_threshold": 0.1}
+            )
+            with self.assertRaises(ValueError):
+                script._validate_resume_signature(
+                    output_dir, {"n_steps": 480, "score_threshold": 0.1}
+                )
 
 
 if __name__ == "__main__":

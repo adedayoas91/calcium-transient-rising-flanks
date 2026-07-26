@@ -55,6 +55,7 @@ class PipelineConfig:
     rise_match_min_overlap_samples: int | None = None
     rise_match_min_overlap_fraction: float = 0.5
     rise_run_context_samples: int | None = None
+    resume_dynamic: bool = False
     null_replicates: int = 20
     stability_bootstrap: int = 20
     skip_dynamic: bool = False
@@ -117,6 +118,8 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
             "--methods",
             config.methods,
         ]
+        if config.resume_dynamic:
+            dynamic_command.append("--resume")
         if config.rise_candidate_filter:
             dynamic_command.append("--rise-candidate-filter")
         if config.dynamic_tau is not None:
@@ -256,6 +259,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rise-match-min-overlap-samples", type=int, default=None)
     parser.add_argument("--rise-match-min-overlap-fraction", type=float, default=0.5)
     parser.add_argument("--rise-run-context-samples", type=int, default=None)
+    parser.add_argument(
+        "--resume-dynamic",
+        action="store_true",
+        help="pass --resume to the locked dynamic-A validation step",
+    )
     parser.add_argument("--null-replicates", type=int, default=20)
     parser.add_argument("--stability-bootstrap", type=int, default=20)
     parser.add_argument("--skip-dynamic", action="store_true")
@@ -293,6 +301,7 @@ def main() -> None:
         rise_match_min_overlap_samples=args.rise_match_min_overlap_samples,
         rise_match_min_overlap_fraction=args.rise_match_min_overlap_fraction,
         rise_run_context_samples=args.rise_run_context_samples,
+        resume_dynamic=args.resume_dynamic,
         null_replicates=args.null_replicates,
         stability_bootstrap=args.stability_bootstrap,
         skip_dynamic=args.skip_dynamic,
