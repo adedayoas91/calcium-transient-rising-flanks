@@ -5,6 +5,7 @@
     "N_PERM": 1000,
     "N_PASTS": 2,
     "N_LAGS": 1,
+    "TAU": null,
     "ALPHA": 0.01,
     "BETA": 0.001,
     "SIMULATION": true,

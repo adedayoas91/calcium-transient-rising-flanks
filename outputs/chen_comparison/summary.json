@@ -3,6 +3,8 @@
   "n_rows": 37,
   "n_summary_rows": 13,
   "includes_published_chen": true,
+  "chen_matrix_manifest": "outputs/chen_direct_matrices/manifest.csv",
+  "n_direct_chen_matrix_rows": 0,
   "outputs": [
     "chen_comparison_rows.csv",
     "chen_comparison_summary.csv"

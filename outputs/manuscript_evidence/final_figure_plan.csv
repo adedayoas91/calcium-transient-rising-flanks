@@ -1,0 +1,8 @@
+figure_id,manuscript_role,source_drafts,status,next_step
+fig_primary_metric_summary,main rise/fall metric panel,empirical_metric_summary.png,ready,assemble final manuscript panel styling
+fig_representative_network_case_c,representative rise/fall network panel,representative_network_case_c.png,ready,use as representative Case C rise/fall network panel
+fig_chen_comparison,published Chen versus local c-GC/c-GC* comparison,chen_comparison_summary.png,ready,decide primary rows versus supplement
+fig_synthetic_tradeoff,synthetic recall versus false-positive tradeoff,synthetic_tradeoff_summary.png,ready,keep claim method-level unless locked dynamic-A is added
+fig_dynamic_a_locked,locked dynamic-A causal-rise/noncausal-fall panel,evidence_gate_status.png,missing_user_run,run locked dynamic-A script before publication claim
+fig_empirical_null_robustness,empirical null-control and stability panel,evidence_gate_status.png,missing_user_run,run empirical null controls and re-estimation stability
+fig_hindbrain_descriptive_extension,descriptive hindbrain extension panel,graph_support_summary.png,ready,use as descriptive supplement unless anatomical partitions are defined

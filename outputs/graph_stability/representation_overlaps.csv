@@ -1,5 +1,5 @@
 binary,case,dataset,edge_intersection,edge_union,fish,fluo_type,jaccard,method,overlap_fraction_source,overlap_fraction_target,recording,source_edges,source_representation,subset,target_edges,target_representation,trace,trial,weighted_jaccard
-False,,hindbrain,8,79,,,0.10126582278481013,rising_flank_cgc,0.3333333333333333,0.12698412698412698,F6T07,24,fall,medial,63,rise,,,0.09861869819485858
+False,,hindbrain,8,78,,,0.10256410256410256,rising_flank_cgc,0.34782608695652173,0.12698412698412698,F6T07,23,fall,medial,63,rise,,,0.09872858428532565
 False,A,motoneurons,0,31,3,A,0.0,rising_flank_cgc,0.0,0.0,F3T1,11,fall,,20,rise,1,,0.0
 False,A,motoneurons,0,17,3,A,0.0,rising_flank_cgc,0.0,0.0,F3T2,4,fall,,13,rise,2,,0.0
 False,A,motoneurons,0,50,5,A,0.0,rising_flank_cgc,,0.0,F5T2,0,fall,,50,rise,2,,0.0

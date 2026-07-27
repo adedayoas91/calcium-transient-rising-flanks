@@ -1,8 +1,8 @@
 case,delta_w_ic_rise_minus_fall_mean,delta_w_rc_rise_minus_fall_mean,edge_density_mean,manuscript_role,method,recordings,representation,retained_edges_mean,total_weight_mean,w_ic_mean,w_rc_mean
-dff,,,0.34825027913263207,full-trace c-GC/c-GC* baseline,cgc,F3T1;F3T2;F5T2,full_trace,67.0,54.01230982180444,0.9762809721839766,0.5055260475422053
-f_smooth,,,0.291512654012654,full-trace c-GC/c-GC* baseline,cgc,F3T1;F3T2;F5T2,full_trace,55.666666666666664,49.856792158266956,1.0,0.5186524546638713
-dff,,,0.35984579146343854,full-trace c-GC/c-GC* baseline,cgc-star,F3T1;F3T2;F5T2,full_trace,69.66666666666667,55.357365359412036,0.9685814142274314,0.5089682917661369
-f_smooth,,,0.26596491743550565,full-trace c-GC/c-GC* baseline,cgc-star,F3T1;F3T2;F5T2,full_trace,52.0,47.14737539480424,1.0,0.5050442277544843
+dff,,,0.3513474270827212,full-trace c-GC/c-GC* baseline,cgc,F3T1;F3T2;F5T2,full_trace,68.33333333333333,54.274276664641924,0.9701808068628904,0.5014902819407322
+f_smooth,,,0.28907514054572875,full-trace c-GC/c-GC* baseline,cgc,F3T1;F3T2;F5T2,full_trace,55.333333333333336,49.69956052621478,1.0,0.5149738262884388
+dff,,,0.3653804528804529,full-trace c-GC/c-GC* baseline,cgc-star,F3T1;F3T2;F5T2,full_trace,71.33333333333333,55.52909535449239,0.9643887246289933,0.509335996621179
+f_smooth,,,0.28060371001547474,full-trace c-GC/c-GC* baseline,cgc-star,F3T1;F3T2;F5T2,full_trace,54.666666666666664,49.2917732121571,1.0,0.5016376578872038
 published,,,,published comparator,chen_improved_gc,published aggregate,published,,,1.0,
 A,0.7256887373983321,0.6900517490174027,0.03226773226773227,falling-flank negative comparator,rising_flank_cgc,F3T1;F3T2;F5T2,fall,5.0,0.6953199799488338,0.17422394117360562,0.0
 A,0.7256887373983321,0.6900517490174027,0.1247569194937616,primary rising-flank candidate,rising_flank_cgc,F3T1;F3T2;F5T2,rise,27.666666666666668,6.925724015085033,0.9186181983868544,0.6313342141173229

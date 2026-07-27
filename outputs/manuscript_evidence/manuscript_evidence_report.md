@@ -12,6 +12,7 @@ Do not promote the empirical superiority claim yet; required user-run publicatio
 ## Chen-Style Comparison
 
 - Full-trace baseline rows available: 4.
+- Direct Chen BVGC/MVGC matrix rows available: 0.
 - Rising-flank rows available: 4.
 - Falling-flank rows available: 4.
 - Published Chen comparator is represented only for the reported ipsilateral-consistency value; missing fields must not be inferred.
@@ -44,10 +45,10 @@ Do not promote the empirical superiority claim yet; required user-run publicatio
 
 - Hindbrain graph-support rows available: 4.
 - Report edge density, retained edges, and total retained weight only; do not report W_IC or W_RC without a declared anatomical partition.
-- medial cgc full_trace: edge density 0.092, retained edges 35.0, total weight 24.054.
-- medial cgc-star full_trace: edge density 0.061, retained edges 23.0, total weight 15.179.
-- medial rising_flank_cgc fall: edge density 0.063, retained edges 24.0, total weight 3.566.
-- medial rising_flank_cgc rise: edge density 0.166, retained edges 63.0, total weight 9.793.
+- medial cgc full_trace: edge density 0.092, retained edges 35.0, total weight 23.528.
+- medial cgc-star full_trace: edge density 0.050, retained edges 19.0, total weight 13.030.
+- medial rising_flank_cgc fall: edge density 0.061, retained edges 23.0, total weight 3.374.
+- medial rising_flank_cgc rise: edge density 0.166, retained edges 63.0, total weight 9.709.
 
 ## Figure Manifest
 

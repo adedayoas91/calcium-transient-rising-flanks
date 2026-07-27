@@ -8,6 +8,8 @@
   "n_hindbrain_graph_support_rows": 4,
   "n_empirical_null_interpretation_rows": 0,
   "n_empirical_stability_interpretation_rows": 0,
+  "n_ready_final_figure_panels": 5,
+  "n_gated_final_figure_panels": 2,
   "n_missing_publication_gates": 5,
   "figure_outputs": [
     "empirical_metric_summary.png",
@@ -15,7 +17,8 @@
     "chen_comparison_summary.png",
     "representative_network_case_c.png",
     "graph_support_summary.png",
-    "evidence_gate_status.png"
+    "evidence_gate_status.png",
+    "main_results_overview.png"
   ],
   "outputs": [
     "chen_interpretation_table.csv",
@@ -27,13 +30,16 @@
     "empirical_stability_interpretation.csv",
     "evidence_gates.csv",
     "figure_manifest.csv",
+    "final_figure_plan.csv",
     "manuscript_evidence_report.md",
     "manuscript_results_snippets.tex",
+    "manuscript_figure_layout.tex",
     "empirical_metric_summary.png",
     "synthetic_tradeoff_summary.png",
     "chen_comparison_summary.png",
     "representative_network_case_c.png",
     "graph_support_summary.png",
-    "evidence_gate_status.png"
+    "evidence_gate_status.png",
+    "main_results_overview.png"
   ]
 }
