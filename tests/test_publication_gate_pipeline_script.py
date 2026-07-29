@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -36,6 +37,7 @@ class PublicationGatePipelineScriptTests(unittest.TestCase):
                 "todo completion audit",
             ],
         )
+        self.assertEqual([step.number for step in steps], [1, 2, 3, 4, 5, 6])
         dynamic = steps[0].command
         self.assertIn("--methods", dynamic)
         self.assertIn("cgc,cgc-star", dynamic)
@@ -80,7 +82,7 @@ class PublicationGatePipelineScriptTests(unittest.TestCase):
         self.assertIn("--rise-run-context-samples", dynamic)
         self.assertIn("5", dynamic)
 
-    def test_skip_options_remove_only_heavy_gate_steps(self) -> None:
+    def test_skip_options_mark_only_heavy_gate_steps(self) -> None:
         script = _load_script_module()
 
         config = script.PipelineConfig(
@@ -94,11 +96,42 @@ class PublicationGatePipelineScriptTests(unittest.TestCase):
         self.assertEqual(
             [step.name for step in steps],
             [
+                "locked dynamic-A validation",
+                "empirical null controls",
+                "empirical re-estimation stability",
                 "result readiness report",
                 "manuscript evidence package",
                 "todo completion audit",
             ],
         )
+        self.assertEqual([step.number for step in steps], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(
+            [step.skip_reason for step in steps[:3]],
+            [
+                "requested by --skip-dynamic",
+                "requested by --skip-null",
+                "requested by --skip-stability",
+            ],
+        )
+        self.assertEqual([step.skip_reason for step in steps[3:]], [None, None, None])
+
+    def test_skip_completed_marks_existing_heavy_gate_outputs(self) -> None:
+        script = _load_script_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            (output_dir / "summary.json").write_text("{}", encoding="utf-8")
+            config = script.PipelineConfig(
+                python="python",
+                dynamic_output_dir=output_dir,
+                skip_completed=True,
+            )
+            steps = script.build_steps(config)
+
+            self.assertEqual(
+                steps[0].skip_reason,
+                f"already complete: {output_dir / 'summary.json'}",
+            )
 
     def test_formats_commands_without_shell_execution(self) -> None:
         script = _load_script_module()

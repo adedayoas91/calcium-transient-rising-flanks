@@ -76,7 +76,14 @@ This wraps `examples/run_publication_gate_pipeline.py` for the heavier user-run 
 - manuscript evidence package
 - todo completion audit
 
-If you already ran step 2 and do not want to repeat dynamic validation, set `SKIP_DYNAMIC = True` in this notebook. Leave all skip flags as `False` for a single locked publication-gate rerun.
+The notebook now keeps global stage numbers in the runner output and leaves
+completed heavy gates visible as skipped. By default, `SKIP_COMPLETED = True`
+skips dynamic, null-control, or stability gates whose `summary.json` marker
+already exists. To force a full locked rerun, set `SKIP_COMPLETED = False` and
+leave the explicit skip flags as `False`.
+
+For a manual resume after dynamic validation and empirical null controls, set
+`SKIP_DYNAMIC = True`, `SKIP_NULL = True`, and `SKIP_STABILITY = False`.
 
 Set `DYNAMIC_TAU`, `DYNAMIC_N_PASTS`, `MIN_RISE_RUN_SAMPLES`, and the `RISE_MATCH_*` settings in the parameter cell to forward those hyperparameters into the dynamic-A validation stage.
 

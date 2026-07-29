@@ -17,14 +17,18 @@ from pathlib import Path
 
 
 DEFAULT_DYNAMIC_OUTPUT_DIR = Path("outputs/validation_results/dynamic_episodic_locked")
+DEFAULT_NULL_OUTPUT_DIR = Path("outputs/empirical_null_controls")
+DEFAULT_STABILITY_OUTPUT_DIR = Path("outputs/empirical_stability")
 DEFAULT_METHODS = "cgc,cgc-star"
 DEFAULT_EVENT_MODES = "compressed,physical"
 
 
 @dataclass(frozen=True)
 class PipelineStep:
+    number: int
     name: str
     command: tuple[str, ...]
+    skip_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,8 @@ class PipelineConfig:
     methods: str = DEFAULT_METHODS
     event_modes: str = DEFAULT_EVENT_MODES
     dynamic_output_dir: Path = DEFAULT_DYNAMIC_OUTPUT_DIR
+    null_output_dir: Path = DEFAULT_NULL_OUTPUT_DIR
+    stability_output_dir: Path = DEFAULT_STABILITY_OUTPUT_DIR
     dynamic_n_seeds: int = 20
     dynamic_n_steps: int = 1500
     dynamic_n_surrogates: int = 1000
@@ -61,6 +67,7 @@ class PipelineConfig:
     skip_dynamic: bool = False
     skip_null: bool = False
     skip_stability: bool = False
+    skip_completed: bool = False
 
 
 def _base_env() -> dict[str, str]:
@@ -75,123 +82,163 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
     """Build the ordered user-run publication-gate commands."""
 
     steps: list[PipelineStep] = []
-    if not config.skip_dynamic:
-        dynamic_command = [
-            config.python,
-            "examples/dynamic_episodic_validation.py",
-            "--output-dir",
-            str(config.dynamic_output_dir),
-            "--n-seeds",
-            str(config.dynamic_n_seeds),
-            "--n-steps",
-            str(config.dynamic_n_steps),
-            "--n-surrogates",
-            str(config.dynamic_n_surrogates),
-            "--max-lag",
-            str(config.dynamic_max_lag),
-            "--rise-waveform-length",
-            str(config.dynamic_rise_waveform_length),
-            "--topology-mode",
-            config.dynamic_topology_mode,
-            "--fall-state-mode",
-            config.fall_state_mode,
-            "--fall-initial-ceiling-fraction",
-            str(config.fall_initial_ceiling_fraction),
-            "--edge-dropout-probability",
-            str(config.edge_dropout_probability),
-            "--edge-addition-probability",
-            str(config.edge_addition_probability),
-            "--source-dropout-probability",
-            str(config.source_dropout_probability),
-            "--source-recruitment-probability",
-            str(config.source_recruitment_probability),
-            "--source-recruitment-edge-probability",
-            str(config.source_recruitment_edge_probability),
-            "--min-rise-run-samples",
-            str(config.min_rise_run_samples),
-            "--rise-match-min-lag",
-            str(config.rise_match_min_lag),
-            "--rise-match-min-overlap-fraction",
-            str(config.rise_match_min_overlap_fraction),
-            "--event-modes",
-            config.event_modes,
-            "--methods",
-            config.methods,
-        ]
-        if config.resume_dynamic:
-            dynamic_command.append("--resume")
-        if config.rise_candidate_filter:
-            dynamic_command.append("--rise-candidate-filter")
-        if config.dynamic_tau is not None:
-            dynamic_command.extend(["--tau", str(config.dynamic_tau)])
-        if config.dynamic_n_pasts is not None:
-            dynamic_command.extend(["--n-pasts", str(config.dynamic_n_pasts)])
-        if config.rise_match_max_lag is not None:
-            dynamic_command.extend(
-                ["--rise-match-max-lag", str(config.rise_match_max_lag)]
-            )
-        if config.rise_match_min_overlap_samples is not None:
-            dynamic_command.extend(
-                [
-                    "--rise-match-min-overlap-samples",
-                    str(config.rise_match_min_overlap_samples),
-                ]
-            )
-        if config.rise_run_context_samples is not None:
-            dynamic_command.extend(
-                ["--rise-run-context-samples", str(config.rise_run_context_samples)]
-            )
-        steps.append(
-            PipelineStep(
-                "locked dynamic-A validation",
-                tuple(dynamic_command),
-            )
+    dynamic_command = [
+        config.python,
+        "examples/dynamic_episodic_validation.py",
+        "--output-dir",
+        str(config.dynamic_output_dir),
+        "--n-seeds",
+        str(config.dynamic_n_seeds),
+        "--n-steps",
+        str(config.dynamic_n_steps),
+        "--n-surrogates",
+        str(config.dynamic_n_surrogates),
+        "--max-lag",
+        str(config.dynamic_max_lag),
+        "--rise-waveform-length",
+        str(config.dynamic_rise_waveform_length),
+        "--topology-mode",
+        config.dynamic_topology_mode,
+        "--fall-state-mode",
+        config.fall_state_mode,
+        "--fall-initial-ceiling-fraction",
+        str(config.fall_initial_ceiling_fraction),
+        "--edge-dropout-probability",
+        str(config.edge_dropout_probability),
+        "--edge-addition-probability",
+        str(config.edge_addition_probability),
+        "--source-dropout-probability",
+        str(config.source_dropout_probability),
+        "--source-recruitment-probability",
+        str(config.source_recruitment_probability),
+        "--source-recruitment-edge-probability",
+        str(config.source_recruitment_edge_probability),
+        "--min-rise-run-samples",
+        str(config.min_rise_run_samples),
+        "--rise-match-min-lag",
+        str(config.rise_match_min_lag),
+        "--rise-match-min-overlap-fraction",
+        str(config.rise_match_min_overlap_fraction),
+        "--event-modes",
+        config.event_modes,
+        "--methods",
+        config.methods,
+    ]
+    if config.resume_dynamic:
+        dynamic_command.append("--resume")
+    if config.rise_candidate_filter:
+        dynamic_command.append("--rise-candidate-filter")
+    if config.dynamic_tau is not None:
+        dynamic_command.extend(["--tau", str(config.dynamic_tau)])
+    if config.dynamic_n_pasts is not None:
+        dynamic_command.extend(["--n-pasts", str(config.dynamic_n_pasts)])
+    if config.rise_match_max_lag is not None:
+        dynamic_command.extend(["--rise-match-max-lag", str(config.rise_match_max_lag)])
+    if config.rise_match_min_overlap_samples is not None:
+        dynamic_command.extend(
+            [
+                "--rise-match-min-overlap-samples",
+                str(config.rise_match_min_overlap_samples),
+            ]
         )
-    if not config.skip_null:
-        steps.append(
-            PipelineStep(
-                "empirical null controls",
-                (
-                    config.python,
-                    "examples/run_empirical_null_controls.py",
-                    "--methods",
-                    config.methods,
-                    "--n-null-replicates",
-                    str(config.null_replicates),
-                ),
-            )
+    if config.rise_run_context_samples is not None:
+        dynamic_command.extend(
+            ["--rise-run-context-samples", str(config.rise_run_context_samples)]
         )
-    if not config.skip_stability:
-        steps.append(
-            PipelineStep(
-                "empirical re-estimation stability",
-                (
-                    config.python,
-                    "examples/run_empirical_stability.py",
-                    "--methods",
-                    config.methods,
-                    "--n-event-bootstrap",
-                    str(config.stability_bootstrap),
-                ),
-            )
+    steps.append(
+        PipelineStep(
+            1,
+            "locked dynamic-A validation",
+            tuple(dynamic_command),
+            _skip_reason(
+                explicit=config.skip_dynamic,
+                explicit_flag="--skip-dynamic",
+                completed=config.skip_completed
+                and (config.dynamic_output_dir / "summary.json").is_file(),
+                marker=config.dynamic_output_dir / "summary.json",
+            ),
         )
+    )
+    steps.append(
+        PipelineStep(
+            2,
+            "empirical null controls",
+            (
+                config.python,
+                "examples/run_empirical_null_controls.py",
+                "--output-dir",
+                str(config.null_output_dir),
+                "--methods",
+                config.methods,
+                "--n-null-replicates",
+                str(config.null_replicates),
+            ),
+            _skip_reason(
+                explicit=config.skip_null,
+                explicit_flag="--skip-null",
+                completed=config.skip_completed
+                and (config.null_output_dir / "summary.json").is_file(),
+                marker=config.null_output_dir / "summary.json",
+            ),
+        )
+    )
+    steps.append(
+        PipelineStep(
+            3,
+            "empirical re-estimation stability",
+            (
+                config.python,
+                "examples/run_empirical_stability.py",
+                "--output-dir",
+                str(config.stability_output_dir),
+                "--methods",
+                config.methods,
+                "--n-event-bootstrap",
+                str(config.stability_bootstrap),
+            ),
+            _skip_reason(
+                explicit=config.skip_stability,
+                explicit_flag="--skip-stability",
+                completed=config.skip_completed
+                and (config.stability_output_dir / "summary.json").is_file(),
+                marker=config.stability_output_dir / "summary.json",
+            ),
+        )
+    )
     steps.extend(
         [
             PipelineStep(
+                4,
                 "result readiness report",
                 (config.python, "examples/build_result_readiness_report.py"),
             ),
             PipelineStep(
+                5,
                 "manuscript evidence package",
                 (config.python, "examples/build_manuscript_evidence_package.py"),
             ),
             PipelineStep(
+                6,
                 "todo completion audit",
                 (config.python, "examples/build_todo_completion_audit.py"),
             ),
         ]
     )
     return steps
+
+
+def _skip_reason(
+    *,
+    explicit: bool,
+    explicit_flag: str,
+    completed: bool,
+    marker: Path,
+) -> str | None:
+    if explicit:
+        return f"requested by {explicit_flag}"
+    if completed:
+        return f"already complete: {marker}"
+    return None
 
 
 def format_command(command: tuple[str, ...]) -> str:
@@ -205,8 +252,11 @@ def run_steps(
     cwd: Path | None = None,
 ) -> None:
     env = _base_env()
-    for index, step in enumerate(steps, start=1):
-        print(f"{index}. {step.name}")
+    for step in steps:
+        print(f"{step.number}. {step.name}")
+        if step.skip_reason is not None:
+            print(f"   skipped: {step.skip_reason}")
+            continue
         print(f"   {format_command(step.command)}")
         if execute:
             subprocess.run(step.command, cwd=cwd, env=env, check=True)
@@ -224,6 +274,16 @@ def parse_args() -> argparse.Namespace:
         "--dynamic-output-dir",
         type=Path,
         default=DEFAULT_DYNAMIC_OUTPUT_DIR,
+    )
+    parser.add_argument(
+        "--null-output-dir",
+        type=Path,
+        default=DEFAULT_NULL_OUTPUT_DIR,
+    )
+    parser.add_argument(
+        "--stability-output-dir",
+        type=Path,
+        default=DEFAULT_STABILITY_OUTPUT_DIR,
     )
     parser.add_argument("--dynamic-n-seeds", type=int, default=20)
     parser.add_argument("--dynamic-n-steps", type=int, default=1500)
@@ -269,6 +329,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-dynamic", action="store_true")
     parser.add_argument("--skip-null", action="store_true")
     parser.add_argument("--skip-stability", action="store_true")
+    parser.add_argument(
+        "--skip-completed",
+        action="store_true",
+        help="skip heavy gates whose summary.json already exists",
+    )
     return parser.parse_args()
 
 
@@ -279,6 +344,8 @@ def main() -> None:
         methods=args.methods,
         event_modes=args.event_modes,
         dynamic_output_dir=args.dynamic_output_dir,
+        null_output_dir=args.null_output_dir,
+        stability_output_dir=args.stability_output_dir,
         dynamic_n_seeds=args.dynamic_n_seeds,
         dynamic_n_steps=args.dynamic_n_steps,
         dynamic_n_surrogates=args.dynamic_n_surrogates,
@@ -307,6 +374,7 @@ def main() -> None:
         skip_dynamic=args.skip_dynamic,
         skip_null=args.skip_null,
         skip_stability=args.skip_stability,
+        skip_completed=args.skip_completed,
     )
     run_steps(build_steps(config), execute=args.execute, cwd=Path.cwd())
 
