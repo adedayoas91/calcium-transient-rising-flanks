@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import importlib.util
 from pathlib import Path
 import sys
+from typing import Any
 
 import numpy as np
 
@@ -37,6 +38,8 @@ class GraphResult:
     best_lags: np.ndarray
     estimator: str
     candidate_adjacency: np.ndarray | None = None
+    hypothesis_weights: np.ndarray | None = None
+    pair_diagnostics: dict[str, Any] | None = None
 
     @property
     def retained_scores(self) -> np.ndarray:
@@ -373,6 +376,74 @@ def benjamini_hochberg(
     return discoveries
 
 
+def weighted_benjamini_hochberg(
+    p_values: np.ndarray,
+    weights: np.ndarray,
+    alpha: float,
+    eligible_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Return weighted-BH discoveries using fixed, positive prior weights.
+
+    Weights are normalized to mean one over the eligible hypothesis family.
+    They must be learned independently of the p-values under test for the usual
+    weighted-BH error-control interpretation to apply.
+    """
+
+    values = np.asarray(p_values, dtype=float)
+    prior = np.asarray(weights, dtype=float)
+    if values.shape != prior.shape:
+        raise ValueError("weights must match p_values")
+    if not 0 < alpha < 1:
+        raise ValueError("alpha must lie in (0, 1)")
+    if np.any(~np.isfinite(prior)) or np.any(prior <= 0):
+        raise ValueError("weights must be finite and positive")
+    if np.any(~np.isfinite(values)) or np.any((values < 0) | (values > 1)):
+        raise ValueError("p_values must be finite and lie in [0, 1]")
+
+    eligible = np.ones(values.shape, dtype=bool)
+    if values.ndim == 2 and values.shape[0] == values.shape[1]:
+        eligible &= ~np.eye(values.shape[0], dtype=bool)
+    if eligible_mask is not None:
+        mask = np.asarray(eligible_mask, dtype=bool)
+        if mask.shape != values.shape:
+            raise ValueError("eligible_mask must match p_values")
+        eligible &= mask
+
+    discoveries = np.zeros(values.shape, dtype=bool)
+    hypothesis_count = int(np.count_nonzero(eligible))
+    if hypothesis_count == 0:
+        return discoveries
+    normalized = prior[eligible] / float(np.mean(prior[eligible]))
+    weighted_p = values[eligible] / normalized
+    order = np.argsort(weighted_p)
+    ordered = weighted_p[order]
+    thresholds = alpha * (
+        np.arange(1, hypothesis_count + 1, dtype=float) / hypothesis_count
+    )
+    accepted = np.flatnonzero(ordered <= thresholds)
+    if accepted.size:
+        cutoff = ordered[accepted[-1]]
+        discoveries[eligible] = weighted_p <= cutoff
+    return discoveries
+
+
+def finite_sample_permutation_p_values(
+    p_values: np.ndarray,
+    n_surrogates: int,
+) -> np.ndarray:
+    """Apply the plus-one correction to Monte Carlo permutation p-values."""
+
+    if n_surrogates < 1:
+        raise ValueError("n_surrogates must be positive")
+    values = np.asarray(p_values, dtype=float)
+    if np.any(~np.isfinite(values)) or np.any((values < 0) | (values > 1)):
+        raise ValueError("p_values must be finite and lie in [0, 1]")
+    return np.minimum(
+        (values * n_surrogates + 1.0) / (n_surrogates + 1.0),
+        1.0,
+    )
+
+
 class CausalisedGC:
     """Run supplied c-GC/c-GC* and return a typed graph result.
 
@@ -510,6 +581,20 @@ class CausalisedGC:
         np.fill_diagonal(mask, False)
         return mask
 
+    @staticmethod
+    def _hypothesis_weights(
+        data: np.ndarray,
+        hypothesis_weights: np.ndarray | None,
+    ) -> np.ndarray | None:
+        if hypothesis_weights is None:
+            return None
+        weights = np.asarray(hypothesis_weights, dtype=float)
+        if weights.shape != (data.shape[0], data.shape[0]):
+            raise ValueError("hypothesis_weights must be square with one row per ROI")
+        if np.any(~np.isfinite(weights)) or np.any(weights <= 0):
+            raise ValueError("hypothesis_weights must be finite and positive")
+        return weights.copy()
+
     def rise_flank_candidates(
         self,
         representation: np.ndarray,
@@ -554,6 +639,7 @@ class CausalisedGC:
         data: np.ndarray,
         event_indices: tuple[np.ndarray, ...] | None,
         segment_ids: np.ndarray | None,
+        candidate_mask: np.ndarray | None,
     ):
         core = self._core()
         if self.event_mode == "physical" and (
@@ -564,15 +650,21 @@ class CausalisedGC:
                 event_indices=event_indices,
                 segment_ids=segment_ids,
                 verbose=0,
+                eligible_pairs=candidate_mask,
             )
         if event_indices is not None:
-            return core.fit_event_compressed(data, event_indices, verbose=0)
+            return core.fit_event_compressed(
+                data,
+                event_indices,
+                verbose=0,
+                eligible_pairs=candidate_mask,
+            )
         values = (
             data
             if event_indices is None
             else self._mask_to_event_indices(data, event_indices)
         )
-        return core.fit(values, verbose=0)
+        return core.fit(values, verbose=0, eligible_pairs=candidate_mask)
 
     def _graph_from_core(
         self,
@@ -580,9 +672,11 @@ class CausalisedGC:
         *,
         physical: bool,
         candidate_adjacency: np.ndarray | None = None,
+        hypothesis_weights: np.ndarray | None = None,
     ) -> GraphResult:
         n_nodes = core.data.shape[0]
         candidate_mask = self._candidate_mask(core.data, candidate_adjacency)
+        weights = self._hypothesis_weights(core.data, hypothesis_weights)
         tested_lags = self._tested_lags()
         lag_rows = np.concatenate(
             [
@@ -610,15 +704,21 @@ class CausalisedGC:
             axis=0,
         )[0]
         if self.n_surrogates:
-            adjacency = (
-                benjamini_hochberg(
+            if self.fdr and weights is not None:
+                adjacency = weighted_benjamini_hochberg(
+                    p_values,
+                    weights,
+                    self.alpha,
+                    eligible_mask=candidate_mask,
+                )
+            elif self.fdr:
+                adjacency = benjamini_hochberg(
                     p_values,
                     self.alpha,
                     eligible_mask=candidate_mask,
                 )
-                if self.fdr
-                else p_values <= self.alpha
-            )
+            else:
+                adjacency = p_values <= self.alpha
         else:
             adjacency = scores > self.score_threshold
         adjacency = np.asarray(adjacency, dtype=bool)
@@ -636,6 +736,12 @@ class CausalisedGC:
             best_lags=best_lags,
             estimator=self._method_label(physical),
             candidate_adjacency=candidate_mask,
+            hypothesis_weights=weights,
+            pair_diagnostics=(
+                None
+                if getattr(core, "pair_diagnostics_", None) is None
+                else dict(core.pair_diagnostics_)
+            ),
         )
 
     def fit(
@@ -646,6 +752,7 @@ class CausalisedGC:
         *,
         event_indices: Sequence[np.ndarray] | None = None,
         candidate_adjacency: np.ndarray | None = None,
+        hypothesis_weights: np.ndarray | None = None,
     ) -> GraphResult:
         """Fit c-GC/c-GC* on full traces or selected event frames."""
 
@@ -659,6 +766,12 @@ class CausalisedGC:
         data = validate_traces(traces)
         indices = self._indices(data, event_indices)
         candidate_mask = self._candidate_mask(data, candidate_adjacency)
+        core_eligible_pairs = None if candidate_adjacency is None else candidate_mask
+        weights = self._hypothesis_weights(data, hypothesis_weights)
+        if weights is not None and (self.n_surrogates == 0 or not self.fdr):
+            raise ValueError(
+                "hypothesis_weights require positive n_surrogates and fdr=True"
+            )
         segments = (
             None
             if segment_ids is None
@@ -668,16 +781,17 @@ class CausalisedGC:
             indices is not None or segments is not None
         )
         if self.random_state is None:
-            core = self._fit_core(data, indices, segments)
+            core = self._fit_core(data, indices, segments, core_eligible_pairs)
         else:
             random_state = np.random.get_state()
             try:
                 np.random.seed(self.random_state)
-                core = self._fit_core(data, indices, segments)
+                core = self._fit_core(data, indices, segments, core_eligible_pairs)
             finally:
                 np.random.set_state(random_state)
         return self._graph_from_core(
             core,
             physical=physical,
             candidate_adjacency=candidate_mask,
+            hypothesis_weights=weights,
         )

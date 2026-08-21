@@ -87,6 +87,37 @@ For a manual resume after dynamic validation and empirical null controls, set
 
 Set `DYNAMIC_TAU`, `DYNAMIC_N_PASTS`, `MIN_RISE_RUN_SAMPLES`, and the `RISE_MATCH_*` settings in the parameter cell to forward those hyperparameters into the dynamic-A validation stage.
 
+## 6. Three-State Temporal-Prior Follow-Up
+
+13. `notebooks/simulations/04_temporal_resolvability_map.ipynb`
+14. `notebooks/motorneurons/Temporal_resolvability_screen.ipynb`
+
+Run the synthetic notebook first. It is the user-run entry point for the locked
+three-state temporal-resolvability experiment and keeps manual results separate
+from the existing reference run. Enable its toggles in order:
+
+1. `RUN_SMOKE = True`
+2. `RUN_LOCKED_GRID = True`
+3. `RUN_STRICT_ANALYSIS = True`
+
+The smoke run writes to
+`outputs/validation_results/temporal_resolvability_map_manual_smoke/`; the
+locked grid and strict analysis write to
+`outputs/validation_results/temporal_resolvability_map_manual/`. The analysis
+toggle requires the locked grid's `resolvability_rows.csv` and does not fall
+back to results produced by another run.
+
+Only after checking the synthetic resolution boundary should you run the
+motoneuron screen. Set `RUN_SCREEN = True` in the empirical notebook. Its
+primary configuration uses case D, all recordings, fixed 240-frame validation
+windows, and writes to `outputs/motorneurons/temporal_screen_manual/`.
+
+The empirical notebook is a truth-free stability screen, not a causal graph
+validation. It reports three-state candidate density, held-out direction
+replication, and timing-shift null diagnostics. Repeat it with 120-, 240-, and
+480-frame windows before treating a diagnostic pass as permission to compare
+unrestricted, hard-pruned, and soft-prior c-GC fits.
+
 ## Optional Smoke Checks
 
 The scripts below are quick development checks and are not required for the full simulation execution order:

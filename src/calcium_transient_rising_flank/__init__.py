@@ -20,10 +20,13 @@ from .estimators import (
     RiseFlankCandidateMatch,
     RiseFlankCandidateResult,
     RiseFlankRunSummary,
+    benjamini_hochberg,
     extract_rise_flank_runs,
+    finite_sample_permutation_p_values,
     match_shifted_rise_flank_runs,
     rise_flank_candidate_pairs,
     selected_frame_indices,
+    weighted_benjamini_hochberg,
 )
 from .metrics import delta_w_ic, edge_recovery, graph_stability, w_ic, w_rc
 from .pipeline import AnalysisConfig, PipelineResult, run_pipeline
@@ -34,7 +37,7 @@ from .plotting import (
     plot_topographic_pair,
 )
 from .preprocessing import ScenarioData, build_scenarios
-from .representations import RepresentationBundle, build_representations
+from .representations import RepresentationBundle, build_representations, rising_flank
 from .robustness import (
     SensitivityRun,
     SyntheticCondition,
@@ -45,6 +48,12 @@ from .robustness import (
     split_calibration_evaluation,
 )
 from .sensitivity import PartialAncestralGraph, run_latent_confounding_sensitivity
+from .temporal_priors import (
+    TemporalPriorResult,
+    TemporalPriorStateMasks,
+    build_temporal_prior,
+    temporal_prior_state_masks,
+)
 from .validation import (
     DynamicSimulationConfig,
     EventNullControlResult,
@@ -86,10 +95,13 @@ __all__ = [
     "SyntheticDataset",
     "SyntheticEpisode",
     "SyntheticGridRun",
+    "TemporalPriorResult",
+    "TemporalPriorStateMasks",
     "TransientSummary",
     "add_paired_deltas",
     "build_representations",
     "build_scenarios",
+    "build_temporal_prior",
     "bootstrap_event_indices",
     "characterize_transients",
     "cross_recording_surrogate",
@@ -97,6 +109,7 @@ __all__ = [
     "downsample_dataset",
     "edge_recovery",
     "extract_rise_flank_runs",
+    "finite_sample_permutation_p_values",
     "graph_stability",
     "graph_summary",
     "jitter_event_indices",
@@ -109,6 +122,7 @@ __all__ = [
     "plot_topographic_pair",
     "residual_diagnostics",
     "reverse_event_indices",
+    "rising_flank",
     "rise_flank_candidate_pairs",
     "run_analysis_sensitivity",
     "run_event_bootstrap_stability",
@@ -125,7 +139,10 @@ __all__ = [
     "sides_from_mid",
     "split_calibration_evaluation",
     "summarize_adjacency_cache",
+    "temporal_prior_state_masks",
     "validate_representations",
+    "weighted_benjamini_hochberg",
+    "benjamini_hochberg",
     "w_ic",
     "w_rc",
     "write_summary_csv",

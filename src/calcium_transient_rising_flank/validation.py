@@ -79,6 +79,7 @@ class DynamicSimulationConfig:
     fall_to_rise_ratio_max: float = 3.5
     propagation_delay: int = 1
     initial_activation_probability: float = 0.35
+    initial_activation_mode: str = "all_active"
     edge_dropout_probability: float = 0.2
     edge_addition_probability: float = 0.0
     source_dropout_probability: float = 0.0
@@ -298,6 +299,10 @@ def _validate_dynamic_config(
         raise ValueError("propagation_delay must be positive")
     if config.propagation_delay >= min_rise:
         raise ValueError("propagation_delay must be shorter than the rise phase")
+    if config.initial_activation_mode not in {"all_active", "source_nodes"}:
+        raise ValueError(
+            "initial_activation_mode must be 'all_active' or 'source_nodes'"
+        )
     if config.rise_gain <= 0:
         raise ValueError("rise_gain must be positive")
     if config.fall_noise_scale < 0:
@@ -518,11 +523,16 @@ def _simulate_dynamic_calcium_dataset(
         for time in range(rise_start, rise_stop):
             phase_labels[time] = 1
             if time == rise_start:
+                initial_candidates = active_nodes
+                if config.initial_activation_mode == "source_nodes":
+                    source_nodes = active_nodes & ~np.any(graph, axis=0)
+                    if source_nodes.any():
+                        initial_candidates = source_nodes
                 spontaneous = (
                     rng.random(n_rois) < config.initial_activation_probability
-                ) & active_nodes
-                if active_nodes.any() and not spontaneous.any():
-                    available_nodes = np.flatnonzero(active_nodes)
+                ) & initial_candidates
+                if initial_candidates.any() and not spontaneous.any():
+                    available_nodes = np.flatnonzero(initial_candidates)
                     spontaneous[
                         available_nodes[
                             int(rng.integers(0, len(available_nodes)))

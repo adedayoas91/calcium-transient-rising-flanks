@@ -5,9 +5,11 @@ import numpy as np
 from calcium_transient_rising_flank.estimators import (
     CausalisedGC,
     _load_gcstar_class,
+    finite_sample_permutation_p_values,
     extract_rise_flank_runs,
     rise_flank_candidate_pairs,
     selected_frame_indices,
+    weighted_benjamini_hochberg,
 )
 from core.rising_flanks import RisingFlanks
 
@@ -151,6 +153,48 @@ class EstimatorTests(unittest.TestCase):
         self.assertEqual(result.scores[1, 0], 0.0)
         self.assertEqual(result.p_values[1, 0], 1.0)
         np.testing.assert_array_equal(result.candidate_adjacency, candidate_adjacency)
+
+    def test_weighted_bh_prioritizes_without_removing_hypotheses(self) -> None:
+        p_values = np.array(
+            [
+                [1.0, 0.03, 1.0],
+                [0.03, 1.0, 1.0],
+                [1.0, 1.0, 1.0],
+            ]
+        )
+        weights = np.ones_like(p_values)
+        weights[0, 1] = 9.0
+        weights[1, 0] = 1.0
+
+        discoveries = weighted_benjamini_hochberg(
+            p_values,
+            weights,
+            alpha=0.05,
+        )
+
+        self.assertTrue(discoveries[0, 1])
+        self.assertFalse(discoveries[1, 0])
+        self.assertFalse(np.any(np.diag(discoveries)))
+
+    def test_weighted_bh_rejects_nonpositive_weights(self) -> None:
+        p_values = np.full((2, 2), 0.5)
+        weights = np.ones((2, 2))
+        weights[0, 1] = 0.0
+
+        with self.assertRaisesRegex(ValueError, "positive"):
+            weighted_benjamini_hochberg(p_values, weights, alpha=0.05)
+
+    def test_finite_sample_permutation_correction_prevents_zero_p_values(
+        self,
+    ) -> None:
+        corrected = finite_sample_permutation_p_values(
+            np.array([[0.0, 1.0 / 19.0], [10.0 / 19.0, 1.0]]),
+            n_surrogates=19,
+        )
+
+        self.assertEqual(corrected[0, 0], 0.05)
+        self.assertEqual(corrected[0, 1], 0.1)
+        self.assertEqual(corrected[1, 1], 1.0)
 
     def test_fixed_tau_is_separate_from_history_depth(self) -> None:
         rng = np.random.default_rng(14)
