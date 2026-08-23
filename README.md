@@ -121,13 +121,13 @@ PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache
   --output outputs/minimal_reproducible_analysis.json
 ```
 
-Build the bounded reviewer-sensitivity package. This reuses the saved locked
+Build the bounded sensitivity package. This reuses the saved locked
 dynamic rows to compute seed-level bootstrap confidence intervals and generator
 summaries, then runs a small locked static-synthetic threshold/smoothing grid:
 
 ```bash
 PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
-  .venv/bin/python examples/build_reviewer_sensitivity_package.py
+  .venv/bin/python examples/build_sensitivity_package.py
 ```
 
 The package writes `outputs/reviewer_sensitivity/dynamic_seed_summary.csv`,
