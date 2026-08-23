@@ -83,6 +83,16 @@ READY_TO_RUN_TOGGLES = {
     "motorneurons/lpcmci.ipynb": "RUN_LPCMCI",
     "motorneurons/oasis.ipynb": "RUN_OASIS",
 }
+PORTABLE_RUNNER_NOTEBOOKS = (
+    "simulations/05_calibration_onset_run.ipynb",
+    "simulations/06_dynamic_extensions_run.ipynb",
+    "simulations/08_revision_campaign_run.ipynb",
+    "simulations/lpcmci.ipynb",
+    "simulations/oasis.ipynb",
+    "motorneurons/fdr_reestimation.ipynb",
+    "motorneurons/lpcmci.ipynb",
+    "motorneurons/oasis.ipynb",
+)
 
 
 def _all_notebooks() -> list[Path]:
@@ -174,6 +184,30 @@ class NotebookExecutionContractTests(unittest.TestCase):
             with self.subTest(notebook=relative_path):
                 self.assertRegex(source, rf"\b{re.escape(toggle)}\s*=\s*True\b")
                 self.assertNotIn("--dry-run", source)
+
+    def test_runner_notebooks_find_root_from_common_jupyter_directories(self) -> None:
+        package_root = NOTEBOOK_ROOT.parent.resolve()
+        outer_root = package_root.parent
+        for relative_path in PORTABLE_RUNNER_NOTEBOOKS:
+            path = NOTEBOOK_ROOT / relative_path
+            source = "\n".join(_code_cells(path))
+            function_start = source.index("def find_package_root")
+            assignment_start = source.index(
+                "PACKAGE_ROOT = find_package_root()", function_start
+            )
+            namespace = {"Path": Path}
+            exec(source[function_start:assignment_start], namespace)
+            find_package_root = namespace["find_package_root"]
+            with self.subTest(notebook=relative_path):
+                self.assertNotIn("PACKAGE_ROOT = Path.cwd()", source)
+                self.assertNotIn("Start this notebook from", source)
+                self.assertRegex(
+                    source,
+                    r"OUTPUT_(?:DIR|ROOT)\s*=\s*PACKAGE_ROOT\s*/",
+                )
+                self.assertEqual(find_package_root(path.parent), package_root)
+                self.assertEqual(find_package_root(package_root), package_root)
+                self.assertEqual(find_package_root(outer_root), package_root)
 
     def test_baseline_notebooks_use_the_cgc_input_contracts(self) -> None:
         for name in ("lpcmci.ipynb", "oasis.ipynb"):
