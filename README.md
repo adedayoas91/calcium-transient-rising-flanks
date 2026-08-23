@@ -98,6 +98,17 @@ lags while blocking cross-segment discontinuities.
 
 ## Quick Start
 
+Create the complete locked environment, including notebook tooling and both
+optional scientific baselines:
+
+```bash
+uv sync --frozen --all-extras
+```
+
+The repository pins Python 3.13 in `.python-version`. Run commands through
+`uv run --no-sync` after setup so concurrent notebooks cannot mutate the shared
+environment.
+
 Run the unit tests without installing another test runner:
 
 ```bash

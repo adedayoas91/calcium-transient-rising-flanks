@@ -185,8 +185,8 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 self.assertRegex(source, rf"\b{re.escape(toggle)}\s*=\s*True\b")
                 self.assertNotIn("--dry-run", source)
 
-    def test_baseline_environment_setup_preserves_shared_environment(self) -> None:
-        setup_command = "uv sync --frozen --all-extras --inexact"
+    def test_baseline_environment_setup_reproduces_shared_environment(self) -> None:
+        setup_command = "uv sync --frozen --all-extras"
         documentation = (NOTEBOOK_ROOT / "exec_order.md").read_text()
         self.assertIn(setup_command, documentation)
         self.assertIn("uv run --no-sync", documentation)

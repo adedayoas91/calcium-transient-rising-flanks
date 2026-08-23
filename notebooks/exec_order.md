@@ -17,16 +17,17 @@ Tigramite method. Their notebooks and output roots are separate so the two
 baselines can run in parallel.
 
 ```bash
-uv sync --frozen --all-extras --inexact
+uv sync --frozen --all-extras
 ```
 
-`uv sync` is exact by default: packages outside the selected base dependencies
-and extras may be removed. `--inexact` preserves existing Jupyter, testing, and
-machine-specific packages while installing both locked baseline extras. Do not
-run the two one-extra sync commands sequentially against the same `.venv`; the
-second command can uninstall the first baseline's dependencies. Subsequent
-commands use `uv run --no-sync`, and the notebooks call the prepared `.venv`
-directly, so concurrent runs do not mutate the environment.
+The committed extras include the Jupyter kernel, notebook widgets, test and
+lint tools, and both scientific baselines. This exact sync therefore recreates
+the declared project environment from `uv.lock`. Packages unrelated to the
+project may still be removed; use a separate environment for unrelated tools.
+Do not run the two one-extra sync commands sequentially against the same
+`.venv`; the second command can uninstall the first baseline's dependencies.
+Subsequent commands use `uv run --no-sync`, and the notebooks call the prepared
+`.venv` directly, so concurrent runs do not mutate the environment.
 
 The committed `uv.lock` contains the resolved baseline dependencies. Use the
 same environment for every stage so OASIS and LPCMCI versions remain matched.
