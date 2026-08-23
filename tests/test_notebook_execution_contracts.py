@@ -185,6 +185,18 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 self.assertRegex(source, rf"\b{re.escape(toggle)}\s*=\s*True\b")
                 self.assertNotIn("--dry-run", source)
 
+    def test_baseline_environment_setup_preserves_shared_environment(self) -> None:
+        setup_command = "uv sync --frozen --all-extras --inexact"
+        documentation = (NOTEBOOK_ROOT / "exec_order.md").read_text()
+        self.assertIn(setup_command, documentation)
+        self.assertIn("uv run --no-sync", documentation)
+        for relative_path in READY_TO_RUN_TOGGLES:
+            notebook_text = (NOTEBOOK_ROOT / relative_path).read_text()
+            with self.subTest(notebook=relative_path):
+                self.assertIn(setup_command, notebook_text)
+                self.assertNotIn("uv sync --extra pag", notebook_text)
+                self.assertNotIn("uv sync --extra deconvolution", notebook_text)
+
     def test_runner_notebooks_find_root_from_common_jupyter_directories(self) -> None:
         package_root = NOTEBOOK_ROOT.parent.resolve()
         outer_root = package_root.parent

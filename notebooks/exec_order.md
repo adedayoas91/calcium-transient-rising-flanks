@@ -17,11 +17,16 @@ Tigramite method. Their notebooks and output roots are separate so the two
 baselines can run in parallel.
 
 ```bash
-uv sync --extra pag --extra deconvolution
+uv sync --frozen --all-extras --inexact
 ```
 
-For separate environments, use `uv sync --extra pag` for LPCMCI or
-`uv sync --extra deconvolution` for OASIS.
+`uv sync` is exact by default: packages outside the selected base dependencies
+and extras may be removed. `--inexact` preserves existing Jupyter, testing, and
+machine-specific packages while installing both locked baseline extras. Do not
+run the two one-extra sync commands sequentially against the same `.venv`; the
+second command can uninstall the first baseline's dependencies. Subsequent
+commands use `uv run --no-sync`, and the notebooks call the prepared `.venv`
+directly, so concurrent runs do not mutate the environment.
 
 The committed `uv.lock` contains the resolved baseline dependencies. Use the
 same environment for every stage so OASIS and LPCMCI versions remain matched.
@@ -31,14 +36,14 @@ same environment for every stage so OASIS and LPCMCI versions remain matched.
 Preview the exact commands first:
 
 ```bash
-uv run --extra pag --extra deconvolution python \
+uv run --no-sync python \
   examples/run_revision_campaign.py --resume --dry-run
 ```
 
 Then launch the full resumable campaign:
 
 ```bash
-uv run --extra pag --extra deconvolution python \
+uv run --no-sync python \
   examples/run_revision_campaign.py --resume
 ```
 
@@ -140,28 +145,28 @@ uv run python examples/dynamic_extensions.py \
   --output-dir outputs/revision_campaign/mixed_fall
 
 # LPCMCI simulation baseline
-uv run --extra pag python examples/simulation_baselines.py \
+uv run --no-sync python examples/simulation_baselines.py \
   --components lpcmci \
   --representations full,deconvolved,rise,fall,fall_residual \
   --n-runs-outer 10 --n-seeds 20 --n-steps 3000 --resume \
   --output-dir outputs/revision_campaign/lpcmci_simulation
 
 # OASIS simulation baseline
-uv run --extra deconvolution python examples/simulation_baselines.py \
+uv run --no-sync python examples/simulation_baselines.py \
   --components oasis --representations full,deconvolved,oasis,rise,fall \
   --cgc-methods cgc,cgc-star --n-runs-outer 10 --n-seeds 20 --n-steps 3000 \
   --n-cgc-surrogates 1000 --resume \
   --output-dir outputs/revision_campaign/oasis_simulation
 
 # LPCMCI motorneuron baseline
-uv run --extra pag python examples/empirical_baselines.py \
+uv run --no-sync python examples/empirical_baselines.py \
   --components lpcmci --fluo-types dff,f_smooth \
   --recordings F3T1,F3T2,F5T2 \
   --representations full,deconvolved,rise,fall,fall_residual --resume \
   --output-dir outputs/revision_campaign/motorneurons_lpcmci
 
 # OASIS motorneuron preprocessing plus c-GC/c-GC* baselines
-uv run --extra deconvolution python examples/empirical_baselines.py \
+uv run --no-sync python examples/empirical_baselines.py \
   --components oasis --fluo-types dff,f_smooth \
   --recordings F3T1,F3T2,F5T2 \
   --oasis-outputs spikes,denoised --cgc-methods cgc,cgc-star \
@@ -241,7 +246,7 @@ After all stage markers report complete, run the authored regression suite and
 inspect the campaign state before revising the manuscript:
 
 ```bash
-uv run --extra pag --extra deconvolution python -m unittest discover -s tests -v
+uv run --no-sync python -m unittest discover -s tests -v
 ```
 
 Then confirm that `campaign_state.json` and every stage `summary.json` reports
