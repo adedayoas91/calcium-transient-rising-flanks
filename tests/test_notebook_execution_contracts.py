@@ -206,6 +206,7 @@ class NotebookExecutionContractTests(unittest.TestCase):
                     r"OUTPUT_(?:DIR|ROOT)\s*=\s*PACKAGE_ROOT\s*/",
                 )
                 self.assertIn("RUNNER_ENV['PYTHONPATH']", source)
+                self.assertIn("RUNNER_ENV['MPLBACKEND'] = 'Agg'", source)
                 self.assertIn("env=RUNNER_ENV", source)
                 self.assertIn("RUNNER_PYTHON =", source)
                 self.assertNotIn("sys.executable, 'examples/", source)
