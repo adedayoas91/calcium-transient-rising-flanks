@@ -52,8 +52,8 @@ def _csv_has_rows(output_root: Path, relative_path: str) -> tuple[bool, str]:
     return True, f"{relative_path} has {rows} data rows"
 
 
-def _summary_has_no_missing_gates(output_root: Path) -> tuple[bool, str]:
-    path = output_root / "manuscript_evidence/summary.json"
+def _summary_has_no_missing_gates(evidence_dir: Path) -> tuple[bool, str]:
+    path = evidence_dir / "summary.json"
     if not path.is_file():
         return False, "manuscript_evidence/summary.json is missing"
     with path.open() as file:
@@ -64,8 +64,8 @@ def _summary_has_no_missing_gates(output_root: Path) -> tuple[bool, str]:
     return True, "manuscript evidence reports zero missing gates"
 
 
-def _final_figures_ready(output_root: Path) -> tuple[bool, str]:
-    path = output_root / "manuscript_evidence/final_figure_plan.csv"
+def _final_figures_ready(evidence_dir: Path) -> tuple[bool, str]:
+    path = evidence_dir / "final_figure_plan.csv"
     if not path.is_file():
         return False, "manuscript_evidence/final_figure_plan.csv is missing"
     with path.open(newline="") as file:
@@ -82,7 +82,12 @@ def _final_figures_ready(output_root: Path) -> tuple[bool, str]:
     return True, f"all {len(rows)} planned figure panels are ready"
 
 
-def todo_gates() -> tuple[TodoGate, ...]:
+def todo_gates(
+    *,
+    dynamic_output_dir: Path | None = None,
+    stability_output_dir: Path | None = None,
+    manuscript_evidence_dir: Path | None = None,
+) -> tuple[TodoGate, ...]:
     return (
         TodoGate(
             item_id="locked_dynamic_a_outputs",
@@ -96,11 +101,12 @@ def todo_gates() -> tuple[TodoGate, ...]:
                 "validation_results/dynamic_episodic_locked/rise_fall_contrasts.csv"
             ),
             checker=lambda root: _all_files_exist(
-                root,
+                dynamic_output_dir
+                or root / "validation_results/dynamic_episodic_locked",
                 (
-                    "validation_results/dynamic_episodic_locked/summary.json",
-                    "validation_results/dynamic_episodic_locked/representation_summary.csv",
-                    "validation_results/dynamic_episodic_locked/rise_fall_contrasts.csv",
+                    "summary.json",
+                    "representation_summary.csv",
+                    "rise_fall_contrasts.csv",
                 ),
             ),
         ),
@@ -112,7 +118,8 @@ def todo_gates() -> tuple[TodoGate, ...]:
             ),
             required_evidence="manuscript_evidence/dynamic_a_interpretation.csv",
             checker=lambda root: _csv_has_rows(
-                root, "manuscript_evidence/dynamic_a_interpretation.csv"
+                manuscript_evidence_dir or root / "manuscript_evidence",
+                "dynamic_a_interpretation.csv",
             ),
         ),
         TodoGate(
@@ -123,7 +130,8 @@ def todo_gates() -> tuple[TodoGate, ...]:
             ),
             required_evidence="manuscript_evidence/empirical_null_interpretation.csv",
             checker=lambda root: _csv_has_rows(
-                root, "manuscript_evidence/empirical_null_interpretation.csv"
+                manuscript_evidence_dir or root / "manuscript_evidence",
+                "empirical_null_interpretation.csv",
             ),
         ),
         TodoGate(
@@ -137,10 +145,17 @@ def todo_gates() -> tuple[TodoGate, ...]:
                 "manuscript_evidence/empirical_stability_interpretation.csv"
             ),
             checker=lambda root: (
-                _all_files_exist(root, ("empirical_stability/stability_summary.csv",))
-                if not (root / "empirical_stability/stability_summary.csv").is_file()
+                _all_files_exist(
+                    stability_output_dir or root / "empirical_stability",
+                    ("stability_summary.csv",),
+                )
+                if not (
+                    (stability_output_dir or root / "empirical_stability")
+                    / "stability_summary.csv"
+                ).is_file()
                 else _csv_has_rows(
-                    root, "manuscript_evidence/empirical_stability_interpretation.csv"
+                    manuscript_evidence_dir or root / "manuscript_evidence",
+                    "empirical_stability_interpretation.csv",
                 )
             ),
         ),
@@ -151,7 +166,9 @@ def todo_gates() -> tuple[TodoGate, ...]:
                 "and stability gates are saved and inspected."
             ),
             required_evidence="manuscript_evidence/summary.json reports zero missing gates",
-            checker=_summary_has_no_missing_gates,
+            checker=lambda root: _summary_has_no_missing_gates(
+                manuscript_evidence_dir or root / "manuscript_evidence"
+            ),
         ),
         TodoGate(
             item_id="final_figures_ready",
@@ -160,14 +177,26 @@ def todo_gates() -> tuple[TodoGate, ...]:
                 "null/robustness user-run gates are resolved."
             ),
             required_evidence="manuscript_evidence/final_figure_plan.csv all statuses ready",
-            checker=_final_figures_ready,
+            checker=lambda root: _final_figures_ready(
+                manuscript_evidence_dir or root / "manuscript_evidence"
+            ),
         ),
     )
 
 
-def build_audit_rows(output_root: Path) -> list[dict[str, Any]]:
+def build_audit_rows(
+    output_root: Path,
+    *,
+    dynamic_output_dir: Path | None = None,
+    stability_output_dir: Path | None = None,
+    manuscript_evidence_dir: Path | None = None,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for gate in todo_gates():
+    for gate in todo_gates(
+        dynamic_output_dir=dynamic_output_dir,
+        stability_output_dir=stability_output_dir,
+        manuscript_evidence_dir=manuscript_evidence_dir,
+    ):
         complete, evidence_status = gate.checker(output_root)
         rows.append(
             {
@@ -226,6 +255,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--dynamic-output-dir", type=Path, default=None)
+    parser.add_argument("--stability-output-dir", type=Path, default=None)
+    parser.add_argument("--manuscript-evidence-dir", type=Path, default=None)
     parser.add_argument(
         "--todo-path",
         type=Path,
@@ -237,7 +269,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    rows = build_audit_rows(args.output_root)
+    rows = build_audit_rows(
+        args.output_root,
+        dynamic_output_dir=args.dynamic_output_dir,
+        stability_output_dir=args.stability_output_dir,
+        manuscript_evidence_dir=args.manuscript_evidence_dir,
+    )
     summary = summarize_audit(rows)
     report = build_markdown_report(rows, summary)
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -246,9 +283,19 @@ def main() -> None:
     with (args.output_dir / "summary.json").open("w") as file:
         json.dump(
             {
+                "status": "complete",
                 **summary,
                 "output_root": str(args.output_root),
                 "todo_path": str(args.todo_path),
+                "dynamic_output_dir": str(args.dynamic_output_dir)
+                if args.dynamic_output_dir is not None
+                else None,
+                "stability_output_dir": str(args.stability_output_dir)
+                if args.stability_output_dir is not None
+                else None,
+                "manuscript_evidence_dir": str(args.manuscript_evidence_dir)
+                if args.manuscript_evidence_dir is not None
+                else None,
             },
             file,
             indent=2,

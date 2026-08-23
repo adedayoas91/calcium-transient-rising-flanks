@@ -67,6 +67,44 @@ class TodoCompletionAuditScriptTests(unittest.TestCase):
         self.assertEqual(summary["pending_gates"], 0)
         self.assertTrue(summary["ready_to_close_user_run_todos"])
 
+    def test_accepts_explicit_pipeline_artifact_directories(self) -> None:
+        script = _load_script_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "outputs"
+            dynamic = Path(temp_dir) / "fresh-dynamic"
+            stability = Path(temp_dir) / "fresh-stability"
+            evidence = Path(temp_dir) / "fresh-evidence"
+            for directory in (dynamic, stability, evidence):
+                directory.mkdir(parents=True)
+            for name in (
+                "summary.json",
+                "representation_summary.csv",
+                "rise_fall_contrasts.csv",
+            ):
+                (dynamic / name).write_text("{}\n")
+            (stability / "stability_summary.csv").write_text("case\nA\n")
+            (evidence / "dynamic_a_interpretation.csv").write_text("method\ncgc\n")
+            (evidence / "empirical_null_interpretation.csv").write_text("case\nA\n")
+            (evidence / "empirical_stability_interpretation.csv").write_text(
+                "case\nA\n"
+            )
+            (evidence / "summary.json").write_text(
+                '{"n_missing_publication_gates": 0}\n'
+            )
+            (evidence / "final_figure_plan.csv").write_text(
+                "figure_id,status\nfig_a,ready\n"
+            )
+
+            rows = script.build_audit_rows(
+                root,
+                dynamic_output_dir=dynamic,
+                stability_output_dir=stability,
+                manuscript_evidence_dir=evidence,
+            )
+            summary = script.summarize_audit(rows)
+
+        self.assertEqual(summary["pending_gates"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ and prints commands only. Pass ``--execute`` to actually run the commands.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import subprocess
@@ -61,6 +62,7 @@ class PipelineConfig:
     rise_match_min_overlap_samples: int | None = None
     rise_match_min_overlap_fraction: float = 0.5
     rise_run_context_samples: int | None = None
+    resume: bool = False
     resume_dynamic: bool = False
     null_replicates: int = 20
     stability_bootstrap: int = 20
@@ -124,7 +126,7 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
         "--methods",
         config.methods,
     ]
-    if config.resume_dynamic:
+    if config.resume or config.resume_dynamic:
         dynamic_command.append("--resume")
     if config.rise_candidate_filter:
         dynamic_command.append("--rise-candidate-filter")
@@ -154,53 +156,59 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
                 explicit=config.skip_dynamic,
                 explicit_flag="--skip-dynamic",
                 completed=config.skip_completed
-                and (config.dynamic_output_dir / "summary.json").is_file(),
+                and _summary_complete(config.dynamic_output_dir / "summary.json"),
                 marker=config.dynamic_output_dir / "summary.json",
             ),
         )
     )
+    null_command = [
+        config.python,
+        "examples/run_empirical_null_controls.py",
+        "--output-dir",
+        str(config.null_output_dir),
+        "--methods",
+        config.methods,
+        "--n-null-replicates",
+        str(config.null_replicates),
+    ]
+    if config.resume:
+        null_command.append("--resume")
     steps.append(
         PipelineStep(
             2,
             "empirical null controls",
-            (
-                config.python,
-                "examples/run_empirical_null_controls.py",
-                "--output-dir",
-                str(config.null_output_dir),
-                "--methods",
-                config.methods,
-                "--n-null-replicates",
-                str(config.null_replicates),
-            ),
+            tuple(null_command),
             _skip_reason(
                 explicit=config.skip_null,
                 explicit_flag="--skip-null",
                 completed=config.skip_completed
-                and (config.null_output_dir / "summary.json").is_file(),
+                and _summary_complete(config.null_output_dir / "summary.json"),
                 marker=config.null_output_dir / "summary.json",
             ),
         )
     )
+    stability_command = [
+        config.python,
+        "examples/run_empirical_stability.py",
+        "--output-dir",
+        str(config.stability_output_dir),
+        "--methods",
+        config.methods,
+        "--n-event-bootstrap",
+        str(config.stability_bootstrap),
+    ]
+    if config.resume:
+        stability_command.append("--resume")
     steps.append(
         PipelineStep(
             3,
             "empirical re-estimation stability",
-            (
-                config.python,
-                "examples/run_empirical_stability.py",
-                "--output-dir",
-                str(config.stability_output_dir),
-                "--methods",
-                config.methods,
-                "--n-event-bootstrap",
-                str(config.stability_bootstrap),
-            ),
+            tuple(stability_command),
             _skip_reason(
                 explicit=config.skip_stability,
                 explicit_flag="--skip-stability",
                 completed=config.skip_completed
-                and (config.stability_output_dir / "summary.json").is_file(),
+                and _summary_complete(config.stability_output_dir / "summary.json"),
                 marker=config.stability_output_dir / "summary.json",
             ),
         )
@@ -210,17 +218,42 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
             PipelineStep(
                 4,
                 "result readiness report",
-                (config.python, "examples/build_result_readiness_report.py"),
+                (
+                    config.python,
+                    "examples/build_result_readiness_report.py",
+                    "--dynamic-output-dir",
+                    str(config.dynamic_output_dir),
+                    "--null-output-dir",
+                    str(config.null_output_dir),
+                    "--stability-output-dir",
+                    str(config.stability_output_dir),
+                ),
             ),
             PipelineStep(
                 5,
                 "manuscript evidence package",
-                (config.python, "examples/build_manuscript_evidence_package.py"),
+                (
+                    config.python,
+                    "examples/build_manuscript_evidence_package.py",
+                    "--dynamic-output-dir",
+                    str(config.dynamic_output_dir),
+                    "--null-output-dir",
+                    str(config.null_output_dir),
+                    "--stability-output-dir",
+                    str(config.stability_output_dir),
+                ),
             ),
             PipelineStep(
                 6,
                 "todo completion audit",
-                (config.python, "examples/build_todo_completion_audit.py"),
+                (
+                    config.python,
+                    "examples/build_todo_completion_audit.py",
+                    "--dynamic-output-dir",
+                    str(config.dynamic_output_dir),
+                    "--stability-output-dir",
+                    str(config.stability_output_dir),
+                ),
             ),
         ]
     )
@@ -239,6 +272,16 @@ def _skip_reason(
     if completed:
         return f"already complete: {marker}"
     return None
+
+
+def _summary_complete(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return payload.get("status") == "complete"
 
 
 def format_command(command: tuple[str, ...]) -> str:
@@ -320,6 +363,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rise-match-min-overlap-fraction", type=float, default=0.5)
     parser.add_argument("--rise-run-context-samples", type=int, default=None)
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume every long-running stage; derived reports are always rebuilt",
+    )
+    parser.add_argument(
         "--resume-dynamic",
         action="store_true",
         help="pass --resume to the locked dynamic-A validation step",
@@ -368,6 +416,7 @@ def main() -> None:
         rise_match_min_overlap_samples=args.rise_match_min_overlap_samples,
         rise_match_min_overlap_fraction=args.rise_match_min_overlap_fraction,
         rise_run_context_samples=args.rise_run_context_samples,
+        resume=args.resume,
         resume_dynamic=args.resume_dynamic,
         null_replicates=args.null_replicates,
         stability_bootstrap=args.stability_bootstrap,

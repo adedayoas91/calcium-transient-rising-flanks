@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -57,6 +58,51 @@ class ResultReadinessReportScriptTests(unittest.TestCase):
         self.assertFalse(summary["ready_for_publication_claims"])
         self.assertIn("validation_results/dynamic_episodic_locked/summary.json", report)
         self.assertIn("empirical_null_controls/null_control_contrasts.csv", report)
+
+    def test_custom_run_paths_and_complete_status_control_readiness(self) -> None:
+        script = _load_script_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dynamic = root / "fresh" / "dynamic"
+            null = root / "fresh" / "null"
+            stability = root / "fresh" / "stability"
+            for directory in (dynamic, null, stability):
+                directory.mkdir(parents=True)
+            (dynamic / "summary.json").write_text(
+                json.dumps({"status": "running"}), encoding="utf-8"
+            )
+            (dynamic / "representation_summary.csv").write_text("method\ncgc\n")
+            (dynamic / "rise_fall_contrasts.csv").write_text("method\ncgc\n")
+            (null / "null_control_contrasts.csv").write_text("case\nA\n")
+            (stability / "stability_summary.csv").write_text("case\nA\n")
+
+            rows = script.build_readiness_rows(
+                root,
+                dynamic_output_dir=dynamic,
+                null_output_dir=null,
+                stability_output_dir=stability,
+            )
+            by_artifact = {row["artifact"]: row for row in rows}
+            self.assertEqual(
+                by_artifact["locked dynamic-A summary"]["status"], "missing"
+            )
+            self.assertEqual(
+                Path(by_artifact["empirical null-control contrasts"]["path"]),
+                null / "null_control_contrasts.csv",
+            )
+
+            (dynamic / "summary.json").write_text(
+                json.dumps({"status": "complete"}), encoding="utf-8"
+            )
+            rows = script.build_readiness_rows(
+                root,
+                dynamic_output_dir=dynamic,
+                null_output_dir=null,
+                stability_output_dir=stability,
+            )
+
+        by_artifact = {row["artifact"]: row for row in rows}
+        self.assertEqual(by_artifact["locked dynamic-A summary"]["status"], "available")
 
 
 if __name__ == "__main__":

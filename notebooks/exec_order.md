@@ -53,8 +53,8 @@ stages in the reviewer-recommended dependency order:
 
 | Stage | Implementation | Primary completion marker |
 |---|---|---|
-| 1 | Matched BH empirical re-estimation | `outputs/reviewer_revision_campaign/empirical_fdr/bh/summary.json` |
-| 2 | Matched unadjusted empirical re-estimation | `outputs/reviewer_revision_campaign/empirical_fdr/unadjusted/summary.json` |
+| 1 | Matched BH empirical re-estimation plus edge-level graph artifacts | `outputs/reviewer_revision_campaign/empirical_fdr/bh/summary.json` |
+| 2 | Matched unadjusted empirical re-estimation plus edge-level graph artifacts | `outputs/reviewer_revision_campaign/empirical_fdr/unadjusted/summary.json` |
 | 3 | Held-out MAD/AR-residual per-ROI thresholds plus score sweeps for recovery, `W_IC`, and `W_RC` | `outputs/reviewer_revision_campaign/threshold_calibration/summary.json` |
 | 4 | Mixed noncausal/causal-fall benchmark, overlap-allowed condition, and kinetic-misspecification condition | `outputs/reviewer_revision_campaign/mixed_fall/summary.json` |
 | 5 | OASIS event/preprocessing baseline and raw LPCMCI PAG baseline under controlled common input | `outputs/reviewer_revision_campaign/lpcmci_oasis/summary.json` |
@@ -81,6 +81,14 @@ Every heavy launch command in these notebooks contains `--resume`; there is no
 notebook toggle that disables checkpoint reuse. The mixed-fall and hybrid grids
 write to separate directories, as do threshold calibration and adaptive onset,
 so later stages cannot overwrite earlier evidence.
+
+The matched empirical runner also writes
+`observed_graph_artifacts_manifest.json` and compressed `.npz` files under each
+arm's `observed_graph_artifacts/` directory. Each observed rise/fall graph keeps
+its adjacency, retained-score, empirical-p-value, and best-lag matrices plus the
+declared testing family and BH/unadjusted metadata. A recording unit is not
+considered resumably complete unless both its summary rows and expected graph
+artifacts are present.
 
 Direct equivalents are:
 
@@ -147,6 +155,37 @@ uv run python examples/reviewer_calibration_onset.py \
   replace the PAG in reporting.
 - OASIS rows are event-recovery and preprocessing-ablation evidence; OASIS is
   not reported as a causal discovery method.
+
+### 4.1 Fresh run versus resume
+
+For a genuinely fresh compute-machine run, start from a clean output root (for
+example, set `OUTPUT_ROOT` in the wrapper notebook to a new dated directory).
+Do not point a fresh run at an older partially populated directory. After the
+first launch, keep the configuration and output root fixed and rerun the same
+cell after any interruption; the checkpoint contract will then recover only
+complete compatible units.
+
+All 19 notebooks under `notebooks/simulations/` and
+`notebooks/motorneurons/` now declare their resume strategy in notebook
+metadata and in an execution-contract cell:
+
+| Notebook family | Resume unit |
+|---|---|
+| Reviewer campaign, FDR, calibration/onset, mixed-fall/hybrid, and baseline wrappers | Runner-defined configuration-validated units via `--resume` |
+| Dynamic-A validation | Method × event mode × condition × seed |
+| Temporal-resolvability map | Regime × native delay × seed |
+| Motoneuron temporal screen | Case × recording |
+| Publication-gate pipeline | Resumable dynamic/null/stability units plus status-validated completed stages |
+| Saved-artifact analysis | Valid completed `summary.json` per derived-analysis stage |
+| Legacy motoneuron/hindbrain c-GC and c-GC* notebooks | Atomic per-recording estimator input cache |
+| Legacy empirical rise/fall notebooks | BH-FDR physical-event case/recording/phase cache; hindbrain uses phase-level units |
+| Static c-GC/c-GC* simulation notebooks | Atomic per-estimator-input cache shared across grids, nulls, and sweeps |
+| Dynamic hyperparameter explorer | Atomic per-simulation-input cache |
+
+The inline caches include an implementation revision and all estimator settings;
+input-dependent caches also include a trace or representation digest. A settings
+or input change therefore selects a new cache or raises a configuration mismatch
+instead of silently mixing analyses.
 
 ### 5. Post-run verification on the compute machine
 

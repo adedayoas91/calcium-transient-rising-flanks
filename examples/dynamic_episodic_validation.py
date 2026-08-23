@@ -998,6 +998,7 @@ def main() -> None:
     _write_csv(args.output_dir / RISE_FALL_CONTRASTS_CSV, contrast_rows)
 
     summary = {
+        "status": "complete",
         "config": config,
         "rows": len(rows),
         "means": _summary_mapping(rows),

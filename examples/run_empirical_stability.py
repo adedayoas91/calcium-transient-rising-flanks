@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import pickle
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +23,10 @@ from calcium_transient_rising_flank.validation import (
     run_leave_one_neuron_stability,
     run_leave_one_transient_stability,
     run_time_window_stability,
+)
+from calcium_transient_rising_flank.checkpointing import (
+    JsonUnitCheckpointStore,
+    atomic_write_json,
 )
 
 DEFAULT_DATA_DIR = Path("data/motoneurons")
@@ -422,6 +425,11 @@ def parse_args() -> argparse.Namespace:
         help="comma-separated estimator methods for combined output, e.g. cgc,cgc-star",
     )
     parser.add_argument("--no-fdr", action="store_true")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse complete method/case/recording stability checkpoint units",
+    )
     parser.add_argument("--seed", type=int, default=0)
     return parser.parse_args()
 
@@ -447,25 +455,57 @@ def main() -> None:
         recordings=_parse_recordings(args.recordings),
     )
     methods = _parse_methods(args.methods or args.method)
+    config = {
+        "data_dir": str(args.data_dir),
+        "cases": list(cases),
+        "recordings": args.recordings,
+        "representations": list(representations),
+        "methods": list(methods),
+        "n_event_bootstrap": args.n_event_bootstrap,
+        "window_length": args.window_length,
+        "window_step": args.window_step,
+        "include_leave_one_neuron": not args.no_leave_one_neuron,
+        "include_leave_one_transient": not args.no_leave_one_transient,
+        "max_lag": args.max_lag,
+        "n_estimator_surrogates": args.n_estimator_surrogates,
+        "alpha": args.alpha,
+        "score_threshold": args.score_threshold,
+        "event_mode": args.event_mode,
+        "fdr": not args.no_fdr,
+        "seed": args.seed,
+    }
+    checkpoint_store = JsonUnitCheckpointStore(
+        args.output_dir,
+        "empirical_stability",
+        config,
+    )
+    checkpoint_store.initialize(resume=args.resume)
     rows: list[dict[str, Any]] = []
     for method_index, method in enumerate(methods):
         factory = _estimator_factory(args, method=method)
         seed_offset = args.seed + method_index * 100_000
         for index, record in enumerate(records):
-            rows.extend(
-                stability_rows_for_recording(
-                    record,
-                    estimator_factory=factory,
-                    method=method,
-                    representations=representations,
-                    n_event_bootstrap=args.n_event_bootstrap,
-                    window_length=args.window_length,
-                    window_step=args.window_step,
-                    include_leave_one_neuron=not args.no_leave_one_neuron,
-                    include_leave_one_transient=not args.no_leave_one_transient,
-                    seed=seed_offset + index,
-                )
+            unit_id = f"{method}|{record['case']}|{record['recording']}"
+            completed_rows = (
+                checkpoint_store.load_rows(unit_id) if args.resume else None
             )
+            if completed_rows is not None:
+                rows.extend(completed_rows)
+                continue
+            unit_rows = stability_rows_for_recording(
+                record,
+                estimator_factory=factory,
+                method=method,
+                representations=representations,
+                n_event_bootstrap=args.n_event_bootstrap,
+                window_length=args.window_length,
+                window_step=args.window_step,
+                include_leave_one_neuron=not args.no_leave_one_neuron,
+                include_leave_one_transient=not args.no_leave_one_transient,
+                seed=seed_offset + index,
+            )
+            checkpoint_store.save_rows(unit_id, unit_rows)
+            rows.extend(unit_rows)
 
     if not rows:
         raise SystemExit("no stability rows were generated")
@@ -473,23 +513,26 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(args.output_dir / "stability_rows.csv", rows)
     _write_csv(args.output_dir / "stability_summary.csv", summaries)
-    with (args.output_dir / "summary.json").open("w") as file:
-        json.dump(
-            {
-                "data_dir": str(args.data_dir),
-                "cases": cases,
-                "recordings": args.recordings,
-                "representations": representations,
-                "methods": methods,
-                "method": methods[0] if len(methods) == 1 else None,
-                "n_rows": len(rows),
-                "n_summary_rows": len(summaries),
-                "outputs": ["stability_rows.csv", "stability_summary.csv"],
-            },
-            file,
-            indent=2,
-        )
-        file.write("\n")
+    atomic_write_json(
+        args.output_dir / "summary.json",
+        {
+            "status": "complete",
+            "config": config,
+            "data_dir": str(args.data_dir),
+            "cases": cases,
+            "recordings": args.recordings,
+            "representations": representations,
+            "methods": methods,
+            "method": methods[0] if len(methods) == 1 else None,
+            "n_rows": len(rows),
+            "n_summary_rows": len(summaries),
+            "outputs": ["stability_rows.csv", "stability_summary.csv"],
+        },
+    )
+    checkpoint_store.finish(
+        completed_units=len(methods) * len(records),
+        total_units=len(methods) * len(records),
+    )
     print(f"wrote {len(rows)} empirical stability rows to {args.output_dir}")
 
 

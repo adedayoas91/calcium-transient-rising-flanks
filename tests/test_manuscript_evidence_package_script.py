@@ -300,6 +300,42 @@ class ManuscriptEvidencePackageScriptTests(unittest.TestCase):
         self.assertIn("empirical null-control package produced 5", snippet)
         self.assertIn("empirical stability package produced 1", snippet)
 
+    def test_reads_user_run_artifacts_from_explicit_pipeline_directories(self) -> None:
+        script = _load_script_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "outputs"
+            out = Path(temp_dir) / "package"
+            null_dir = Path(temp_dir) / "fresh-null"
+            stability_dir = Path(temp_dir) / "fresh-stability"
+            null_dir.mkdir()
+            stability_dir.mkdir()
+            (null_dir / "null_control_contrasts.csv").write_text(
+                "case,method,representation,null_type,n_observed,n_null,"
+                "observed_w_ic_mean,null_w_ic_mean,observed_minus_null_w_ic_mean,"
+                "p_null_ge_observed_w_ic_mean\n"
+                "A,cgc,rise,cyclic_shift,3,30,0.9,0.4,0.5,0.02\n"
+            )
+            (stability_dir / "stability_summary.csv").write_text(
+                "case,method,representation,stability_type,n_rows,n_ok,n_skipped,"
+                "stability_mean,mean_w_ic_mean,mean_w_rc_mean,"
+                "mean_edge_density_mean,mean_retained_edges_mean,"
+                "mean_total_weight_mean\n"
+                "A,cgc,rise,event_bootstrap,3,3,0,0.8,0.9,0.6,0.2,10,4.0\n"
+            )
+
+            summary = script.build_package(
+                root,
+                out,
+                make_figures=False,
+                null_output_dir=null_dir,
+                stability_output_dir=stability_dir,
+            )
+
+        self.assertEqual(summary["n_empirical_null_interpretation_rows"], 5)
+        self.assertEqual(summary["n_empirical_stability_interpretation_rows"], 1)
+        self.assertEqual(summary["null_output_dir"], str(null_dir))
+        self.assertEqual(summary["stability_output_dir"], str(stability_dir))
+
 
 if __name__ == "__main__":
     unittest.main()

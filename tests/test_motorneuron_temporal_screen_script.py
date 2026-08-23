@@ -26,6 +26,51 @@ def _load_script_module():
 
 
 class MotorneuronTemporalScreenScriptTests(unittest.TestCase):
+    def test_resume_reuses_completed_recording_unit_without_rebuilding_prior(self) -> None:
+        script = _load_script_module()
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint_store = script.JsonUnitCheckpointStore(
+                Path(directory),
+                "motorneuron_temporal_screen",
+                {"cases": ["D"], "recordings": "F1T1"},
+            )
+            checkpoint_store.initialize(resume=False)
+            expected_rows = [{"recording": "F1T1", "status": "ok"}]
+            checkpoint_store.save_rows("D|F1T1", expected_rows)
+
+            with patch.object(
+                script,
+                "build_representations",
+                side_effect=AssertionError("resume should skip recomputation"),
+            ):
+                rows = script.run_screen(
+                    [
+                        {
+                            "case": "D",
+                            "description": "test",
+                            "recording": "F1T1",
+                            "fish": 1,
+                            "trial": 1,
+                            "mid": 1,
+                            "traces": np.zeros((3, 96), dtype=float),
+                        }
+                    ],
+                    max_onset_lags=(3,),
+                    deadbands=(0,),
+                    tolerance=0.0,
+                    min_run_samples=2,
+                    segment_mode="fixed_windows",
+                    window_frames=12,
+                    merge_gap_frames=3,
+                    minimum_participating_rois=2,
+                    n_nulls=2,
+                    random_state=10,
+                    checkpoint_store=checkpoint_store,
+                    resume=True,
+                )
+
+        self.assertEqual(rows, expected_rows)
+
     def test_fixed_windows_and_crossfit_have_disjoint_episode_halves(self) -> None:
         script = _load_script_module()
 

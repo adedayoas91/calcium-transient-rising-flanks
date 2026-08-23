@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import pickle
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -22,6 +21,10 @@ from calcium_transient_rising_flank import (
     build_representations,
     build_temporal_prior,
     temporal_prior_state_masks,
+)
+from calcium_transient_rising_flank.checkpointing import (
+    JsonUnitCheckpointStore,
+    atomic_write_json,
 )
 
 
@@ -280,11 +283,22 @@ def run_screen(
     n_nulls: int,
     random_state: int,
     progress: bool = False,
+    checkpoint_store: JsonUnitCheckpointStore | None = None,
+    resume: bool = False,
 ) -> list[dict[str, Any]]:
     if n_nulls < 1:
         raise ValueError("n_nulls must be positive")
     rows: list[dict[str, Any]] = []
     for record_index, record in enumerate(records):
+        unit_id = f"{record['case']}|{record['recording']}"
+        if resume and checkpoint_store is not None:
+            completed_rows = checkpoint_store.load_rows(unit_id)
+            if completed_rows is not None:
+                rows.extend(completed_rows)
+                if progress:
+                    print(f"resumed {unit_id}", flush=True)
+                continue
+        unit_start = len(rows)
         traces = np.asarray(record["traces"], dtype=float)
         rise = build_representations(traces, tolerance=tolerance).rise
         if segment_mode == "fixed_windows":
@@ -317,6 +331,8 @@ def run_screen(
                     "inferred_episode_count": episode_count,
                 }
             )
+            if checkpoint_store is not None:
+                checkpoint_store.save_rows(unit_id, rows[unit_start:])
             continue
         for lag_index, max_onset_lag in enumerate(max_onset_lags):
             for deadband_index, deadband in enumerate(deadbands):
@@ -425,6 +441,8 @@ def run_screen(
                             ),
                         }
                     )
+        if checkpoint_store is not None:
+            checkpoint_store.save_rows(unit_id, rows[unit_start:])
         if progress:
             print(
                 f"completed case={record['case']} recording={record['recording']}",
@@ -532,10 +550,8 @@ def write_outputs(
         ),
         "summary": list(summary),
     }
-    (output_dir / "summary.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    payload["status"] = "complete"
+    atomic_write_json(output_dir / "summary.json", payload)
     (output_dir / "report.md").write_text(
         "\n".join(
             [
@@ -599,6 +615,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--minimum-participating-rois", type=int, default=2)
     parser.add_argument("--n-nulls", type=int, default=20)
     parser.add_argument("--random-state", type=int, default=20260821)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse complete case/recording checkpoint units",
+    )
     return parser.parse_args()
 
 
@@ -611,21 +632,6 @@ def main() -> None:
     )
     if not records:
         raise ValueError("no recordings matched the declared selection")
-    rows = run_screen(
-        records,
-        max_onset_lags=args.max_onset_lags,
-        deadbands=args.deadbands,
-        tolerance=args.tolerance,
-        min_run_samples=args.min_run_samples,
-        segment_mode=args.segment_mode,
-        window_frames=args.window_frames,
-        merge_gap_frames=args.merge_gap_frames,
-        minimum_participating_rois=args.minimum_participating_rois,
-        n_nulls=args.n_nulls,
-        random_state=args.random_state,
-        progress=True,
-    )
-    summary = summarize_rows(rows)
     config = {
         "data_dir": str(args.data_dir),
         "cases": list(args.cases),
@@ -642,7 +648,34 @@ def main() -> None:
         "random_state": args.random_state,
         "causal_identification": False,
     }
+    checkpoint_store = JsonUnitCheckpointStore(
+        args.output_dir,
+        "motorneuron_temporal_screen",
+        config,
+    )
+    checkpoint_store.initialize(resume=args.resume)
+    rows = run_screen(
+        records,
+        max_onset_lags=args.max_onset_lags,
+        deadbands=args.deadbands,
+        tolerance=args.tolerance,
+        min_run_samples=args.min_run_samples,
+        segment_mode=args.segment_mode,
+        window_frames=args.window_frames,
+        merge_gap_frames=args.merge_gap_frames,
+        minimum_participating_rois=args.minimum_participating_rois,
+        n_nulls=args.n_nulls,
+        random_state=args.random_state,
+        progress=True,
+        checkpoint_store=checkpoint_store,
+        resume=args.resume,
+    )
+    summary = summarize_rows(rows)
     write_outputs(args.output_dir, rows, summary, config)
+    checkpoint_store.finish(
+        completed_units=len(records),
+        total_units=len(records),
+    )
     print(args.output_dir)
 
 

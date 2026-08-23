@@ -1608,8 +1608,24 @@ def build_package(
     *,
     make_figures: bool = True,
     figures_dir: Path | None = None,
+    dynamic_output_dir: Path | None = None,
+    null_output_dir: Path | None = None,
+    stability_output_dir: Path | None = None,
+    readiness_output_dir: Path | None = None,
 ) -> dict[str, Any]:
     resolved_figures_dir = resolve_figures_dir(figures_dir)
+    resolved_dynamic_output_dir = dynamic_output_dir or (
+        output_root / "validation_results/dynamic_episodic_locked"
+    )
+    resolved_null_output_dir = null_output_dir or (
+        output_root / "empirical_null_controls"
+    )
+    resolved_stability_output_dir = stability_output_dir or (
+        output_root / "empirical_stability"
+    )
+    resolved_readiness_output_dir = readiness_output_dir or (
+        output_root / "result_readiness"
+    )
     chen_rows = build_chen_interpretation_rows(_read_csv(output_root / CHEN_SUMMARY))
     empirical_rows = build_empirical_pairing_interpretation_rows(
         _read_csv(output_root / EMPIRICAL_TESTS)
@@ -1618,19 +1634,21 @@ def build_package(
         _read_csv(output_root / SYNTHETIC_TRADEOFFS)
     )
     dynamic_rows = build_dynamic_a_interpretation_rows(
-        _read_csv(output_root / DYNAMIC_A_REPRESENTATION_SUMMARY),
-        _read_csv(output_root / DYNAMIC_A_CONTRASTS),
+        _read_csv(resolved_dynamic_output_dir / DYNAMIC_A_REPRESENTATION_SUMMARY.name),
+        _read_csv(resolved_dynamic_output_dir / DYNAMIC_A_CONTRASTS.name),
     )
     graph_rows = build_graph_support_interpretation_rows(
         _read_csv(output_root / GRAPH_STABILITY)
     )
     empirical_null_rows = build_empirical_null_interpretation_rows(
-        _read_csv(output_root / EMPIRICAL_NULL_CONTRASTS)
+        _read_csv(resolved_null_output_dir / EMPIRICAL_NULL_CONTRASTS.name)
     )
     empirical_stability_rows = build_empirical_stability_interpretation_rows(
-        _read_csv(output_root / EMPIRICAL_STABILITY_SUMMARY)
+        _read_csv(resolved_stability_output_dir / EMPIRICAL_STABILITY_SUMMARY.name)
     )
-    gates = build_evidence_gate_rows(_read_csv(output_root / READINESS_ROWS))
+    gates = build_evidence_gate_rows(
+        _read_csv(resolved_readiness_output_dir / READINESS_ROWS.name)
+    )
     figures = build_figure_manifest(
         gates,
         has_dynamic_rows=bool(dynamic_rows),
@@ -1737,7 +1755,12 @@ def build_package(
     (output_dir / "manuscript_figure_layout.tex").write_text(figure_layout)
 
     summary = {
+        "status": "complete",
         "output_root": str(output_root),
+        "dynamic_output_dir": str(resolved_dynamic_output_dir),
+        "null_output_dir": str(resolved_null_output_dir),
+        "stability_output_dir": str(resolved_stability_output_dir),
+        "readiness_output_dir": str(resolved_readiness_output_dir),
         "n_chen_rows": len(chen_rows),
         "n_empirical_pairing_rows": len(empirical_rows),
         "n_synthetic_tradeoff_rows": len(synthetic_rows),
@@ -1795,6 +1818,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--dynamic-output-dir", type=Path, default=None)
+    parser.add_argument("--null-output-dir", type=Path, default=None)
+    parser.add_argument("--stability-output-dir", type=Path, default=None)
+    parser.add_argument("--readiness-output-dir", type=Path, default=None)
     parser.add_argument(
         "--figures-dir",
         type=Path,
@@ -1812,6 +1839,10 @@ def main() -> None:
         args.output_dir,
         make_figures=not args.no_figures,
         figures_dir=args.figures_dir,
+        dynamic_output_dir=args.dynamic_output_dir,
+        null_output_dir=args.null_output_dir,
+        stability_output_dir=args.stability_output_dir,
+        readiness_output_dir=args.readiness_output_dir,
     )
     print(
         "wrote manuscript evidence package with "

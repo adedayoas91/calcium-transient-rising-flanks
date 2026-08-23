@@ -57,6 +57,10 @@ SELECTED_REPRESENTATIONS = {"rise", "fall", "fall_residual"}
 METHOD_CHOICES = ("cgc", "fcgc", "cgc-star", "cgc*")
 PARTIAL_ROWS_FILE = "null_control_rows.partial.csv"
 PROGRESS_FILE = "progress.json"
+OBSERVED_GRAPH_ARTIFACTS_DIR = "observed_graph_artifacts"
+OBSERVED_GRAPH_ARTIFACTS_MANIFEST_FILE = "observed_graph_artifacts_manifest.json"
+OBSERVED_GRAPH_ARTIFACTS_SCHEMA_VERSION = 1
+ARTIFACT_REPRESENTATIONS = frozenset({"rise", "fall"})
 EDGE_TESTING_FAMILY = (
     "eligible non-self ordered ROI pairs within each "
     "recording/case/method/representation"
@@ -191,6 +195,205 @@ def _append_row(
     rows.append(row)
 
 
+def _atomic_write_npz(path: Path, **arrays: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("wb") as file:
+        np.savez_compressed(file, **arrays)
+    temporary.replace(path)
+
+
+def _artifact_slug(value: str) -> str:
+    return "".join(
+        character if character.isalnum() else "-"
+        for character in str(value).strip().lower()
+    ).strip("-")
+
+
+def _should_stage_observed_graph_artifact(
+    *,
+    representation_name: str,
+    null_type: str,
+    replicate: int,
+) -> bool:
+    return (
+        null_type == "observed"
+        and replicate == 0
+        and representation_name in ARTIFACT_REPRESENTATIONS
+    )
+
+
+def _stage_observed_graph_artifact(
+    artifacts: list[dict[str, Any]] | None,
+    *,
+    base: dict[str, Any],
+    graph,
+    null_type: str,
+    replicate: int,
+    fdr: bool | None,
+) -> None:
+    if artifacts is None:
+        return
+    representation_name = str(base["representation"])
+    if not _should_stage_observed_graph_artifact(
+        representation_name=representation_name,
+        null_type=null_type,
+        replicate=replicate,
+    ):
+        return
+    multiple_testing = None
+    if fdr is not None:
+        multiple_testing = "benjamini-hochberg" if fdr else "unadjusted"
+    artifacts.append(
+        {
+            "case": str(base["case"]),
+            "description": str(base["description"]),
+            "recording": str(base["recording"]),
+            "fish": int(base["fish"]),
+            "trial": int(base["trial"]),
+            "method": str(base["method"]),
+            "representation": representation_name,
+            "null_type": null_type,
+            "replicate": replicate,
+            "fdr": fdr,
+            "multiple_testing": multiple_testing,
+            "edge_testing_family": EDGE_TESTING_FAMILY,
+            "estimator": graph.estimator,
+            "n_rois": int(np.asarray(graph.adjacency).shape[0]),
+            "adjacency": np.asarray(graph.adjacency, dtype=bool).copy(),
+            "retained_scores": np.asarray(graph.retained_scores, dtype=float).copy(),
+            "p_values": np.asarray(graph.p_values, dtype=float).copy(),
+            "best_lags": np.asarray(graph.best_lags, dtype=int).copy(),
+        }
+    )
+
+
+def _artifact_unit_key(entry: dict[str, Any]) -> str:
+    return "|".join((str(entry["method"]), str(entry["case"]), str(entry["recording"])))
+
+
+def _artifact_entry_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(entry["case"]),
+        str(entry["recording"]),
+        str(entry["method"]),
+        str(entry["representation"]),
+    )
+
+
+def _artifact_relative_path(entry: dict[str, Any]) -> str:
+    filename = "__".join(
+        (
+            _artifact_slug(str(entry["case"])),
+            _artifact_slug(str(entry["recording"])),
+            _artifact_slug(str(entry["method"])),
+            _artifact_slug(str(entry["representation"])),
+        )
+    )
+    return f"{OBSERVED_GRAPH_ARTIFACTS_DIR}/{filename}.npz"
+
+
+def _load_observed_graph_artifact_entries(output_dir: Path) -> list[dict[str, Any]]:
+    path = output_dir / OBSERVED_GRAPH_ARTIFACTS_MANIFEST_FILE
+    if not path.exists():
+        return []
+    with path.open() as file:
+        payload = json.load(file)
+    if payload.get("schema_version") != OBSERVED_GRAPH_ARTIFACTS_SCHEMA_VERSION:
+        raise SystemExit("observed graph artifact manifest schema mismatch")
+    entries = payload.get("artifacts")
+    if not isinstance(entries, list):
+        raise SystemExit("observed graph artifact manifest is malformed")
+    return [dict(entry) for entry in entries]
+
+
+def _write_observed_graph_artifacts(
+    output_dir: Path,
+    *,
+    staged_artifacts: list[dict[str, Any]],
+    manifest_entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not staged_artifacts and manifest_entries:
+        payload = {
+            "schema_version": OBSERVED_GRAPH_ARTIFACTS_SCHEMA_VERSION,
+            "edge_testing_family": EDGE_TESTING_FAMILY,
+            "artifacts": sorted(manifest_entries, key=_artifact_entry_key),
+        }
+        _atomic_write_text(
+            output_dir / OBSERVED_GRAPH_ARTIFACTS_MANIFEST_FILE,
+            json.dumps(payload, indent=2) + "\n",
+        )
+        return sorted(manifest_entries, key=_artifact_entry_key)
+
+    merged = {_artifact_entry_key(entry): dict(entry) for entry in manifest_entries}
+    for artifact in staged_artifacts:
+        relative_path = _artifact_relative_path(artifact)
+        path = output_dir / relative_path
+        metadata = {
+            "case": artifact["case"],
+            "description": artifact["description"],
+            "recording": artifact["recording"],
+            "fish": artifact["fish"],
+            "trial": artifact["trial"],
+            "method": artifact["method"],
+            "representation": artifact["representation"],
+            "null_type": artifact["null_type"],
+            "replicate": artifact["replicate"],
+            "fdr": artifact["fdr"],
+            "multiple_testing": artifact["multiple_testing"],
+            "edge_testing_family": artifact["edge_testing_family"],
+            "estimator": artifact["estimator"],
+            "n_rois": artifact["n_rois"],
+        }
+        _atomic_write_npz(
+            path,
+            adjacency=np.asarray(artifact["adjacency"], dtype=bool),
+            retained_scores=np.asarray(artifact["retained_scores"], dtype=float),
+            p_values=np.asarray(artifact["p_values"], dtype=float),
+            best_lags=np.asarray(artifact["best_lags"], dtype=int),
+            metadata_json=np.asarray(json.dumps(metadata, sort_keys=True)),
+        )
+        manifest_entry = {
+            **metadata,
+            "path": relative_path,
+        }
+        merged[_artifact_entry_key(manifest_entry)] = manifest_entry
+    updated_entries = sorted(merged.values(), key=_artifact_entry_key)
+    payload = {
+        "schema_version": OBSERVED_GRAPH_ARTIFACTS_SCHEMA_VERSION,
+        "edge_testing_family": EDGE_TESTING_FAMILY,
+        "artifacts": updated_entries,
+    }
+    _atomic_write_text(
+        output_dir / OBSERVED_GRAPH_ARTIFACTS_MANIFEST_FILE,
+        json.dumps(payload, indent=2) + "\n",
+    )
+    return updated_entries
+
+
+def _expected_observed_graph_artifact_count(
+    representations: tuple[str, ...],
+) -> int:
+    return sum(
+        representation in ARTIFACT_REPRESENTATIONS
+        for representation in representations
+    )
+
+
+def _artifact_entries_by_unit(
+    entries: list[dict[str, Any]],
+    *,
+    output_dir: Path,
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        path = output_dir / str(entry["path"])
+        if not path.exists():
+            continue
+        grouped.setdefault(_artifact_unit_key(entry), []).append(entry)
+    return grouped
+
+
 def null_rows_for_recording(
     record: dict[str, Any],
     *,
@@ -201,6 +404,8 @@ def null_rows_for_recording(
     n_null_replicates: int = 5,
     max_jitter: int = 1,
     seed: int = 0,
+    observed_artifacts: list[dict[str, Any]] | None = None,
+    fdr: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Run observed and null-control graph metrics for one recording/case."""
 
@@ -242,6 +447,14 @@ def null_rows_for_recording(
             mid=record["mid"],
             null_type="observed",
             replicate=0,
+        )
+        _stage_observed_graph_artifact(
+            observed_artifacts,
+            base=base,
+            graph=observed,
+            null_type="observed",
+            replicate=0,
+            fdr=fdr,
         )
 
         reverse_indices = (
@@ -506,7 +719,7 @@ def _run_config(
     methods: tuple[str, ...],
 ) -> dict[str, Any]:
     return {
-        "resume_schema_version": 2,
+        "resume_schema_version": 3,
         "data_dir": str(args.data_dir),
         "cases": list(cases),
         "recordings": args.recordings,
@@ -554,6 +767,8 @@ def _recover_completed_units(
     methods: tuple[str, ...],
     representations: tuple[str, ...],
     n_null_replicates: int,
+    artifact_entries: list[dict[str, Any]] | None = None,
+    output_dir: Path | None = None,
 ) -> tuple[list[dict[str, Any]], set[str]]:
     expected_counts = {
         _unit_key(method, record): _expected_rows_for_recording(
@@ -577,6 +792,17 @@ def _recover_completed_units(
             + ", ".join(sorted(unknown))
         )
     completed: set[str] = set()
+    expected_artifact_count = _expected_observed_graph_artifact_count(representations)
+    enforce_artifacts = (
+        expected_artifact_count > 0
+        and artifact_entries is not None
+        and output_dir is not None
+    )
+    artifacts_by_unit = (
+        {}
+        if not enforce_artifacts
+        else _artifact_entries_by_unit(artifact_entries, output_dir=output_dir)
+    )
     for unit, unit_rows in grouped.items():
         row_keys = {
             (
@@ -587,7 +813,23 @@ def _recover_completed_units(
             for row in unit_rows
         }
         expected_count = expected_counts[unit]
-        if len(unit_rows) == expected_count and len(row_keys) == expected_count:
+        row_complete = len(unit_rows) == expected_count and len(row_keys) == expected_count
+        artifact_complete = True
+        if enforce_artifacts:
+            unit_artifacts = artifacts_by_unit.get(unit, [])
+            artifact_keys = {
+                (
+                    str(entry["representation"]),
+                    str(entry["null_type"]),
+                    int(entry["replicate"]),
+                )
+                for entry in unit_artifacts
+            }
+            artifact_complete = (
+                len(unit_artifacts) == expected_artifact_count
+                and len(artifact_keys) == expected_artifact_count
+            )
+        if row_complete and artifact_complete:
             completed.add(unit)
     recovered_rows = [
         row
@@ -718,6 +960,7 @@ def main() -> None:
     partial_rows_path = args.output_dir / PARTIAL_ROWS_FILE
     completed_units: set[str] = set()
     rows: list[dict[str, Any]] = []
+    manifest_entries: list[dict[str, Any]] = []
     if args.resume and progress_path.exists():
         with progress_path.open() as file:
             progress = json.load(file)
@@ -726,12 +969,26 @@ def main() -> None:
                 "resume configuration does not match the saved empirical run"
             )
         rows = _read_csv(partial_rows_path)
+        manifest_entries = _load_observed_graph_artifact_entries(args.output_dir)
         rows, completed_units = _recover_completed_units(
             rows,
             records=records,
             methods=methods,
             representations=representations,
             n_null_replicates=args.n_null_replicates,
+            artifact_entries=manifest_entries,
+            output_dir=args.output_dir,
+        )
+        manifest_entries = [
+            entry
+            for entry in manifest_entries
+            if _artifact_unit_key(entry) in completed_units
+            and (args.output_dir / str(entry["path"])).exists()
+        ]
+        manifest_entries = _write_observed_graph_artifacts(
+            args.output_dir,
+            staged_artifacts=[],
+            manifest_entries=manifest_entries,
         )
 
     expected_units = len(methods) * len(records)
@@ -756,6 +1013,7 @@ def main() -> None:
             unit = _unit_key(method, record)
             if unit in completed_units:
                 continue
+            staged_artifacts: list[dict[str, Any]] = []
             rows.extend(
                 null_rows_for_recording(
                     record,
@@ -766,7 +1024,14 @@ def main() -> None:
                     n_null_replicates=args.n_null_replicates,
                     max_jitter=args.max_jitter,
                     seed=seed_offset + index,
+                    observed_artifacts=staged_artifacts,
+                    fdr=not args.no_fdr,
                 )
+            )
+            manifest_entries = _write_observed_graph_artifacts(
+                args.output_dir,
+                staged_artifacts=staged_artifacts,
+                manifest_entries=manifest_entries,
             )
             completed_units.add(unit)
             _write_csv(partial_rows_path, rows)
@@ -807,6 +1072,7 @@ def main() -> None:
                     "null_control_rows.csv",
                     "null_control_summary.csv",
                     "null_control_contrasts.csv",
+                    OBSERVED_GRAPH_ARTIFACTS_MANIFEST_FILE,
                 ],
             },
             indent=2,

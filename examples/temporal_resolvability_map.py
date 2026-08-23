@@ -32,6 +32,10 @@ from calcium_transient_rising_flank import (
 )
 from calcium_transient_rising_flank.estimators import extract_rise_flank_runs
 from calcium_transient_rising_flank.representations import estimate_decay
+from calcium_transient_rising_flank.checkpointing import (
+    JsonUnitCheckpointStore,
+    atomic_write_json,
+)
 
 
 DEFAULT_OUTPUT = Path("outputs/validation_results/temporal_resolvability_map")
@@ -450,6 +454,8 @@ def run_resolvability_grid(
     min_run_samples: int = 2,
     matching_window_native_frames: int = max(NATIVE_DELAYS),
     progress: bool = False,
+    checkpoint_store: JsonUnitCheckpointStore | None = None,
+    resume: bool = False,
 ) -> list[dict[str, Any]]:
     """Run the locked screening grid and return fold-level rows."""
 
@@ -462,6 +468,15 @@ def run_resolvability_grid(
             if native_delay >= 48:
                 raise ValueError("native delays must be shorter than the rise phase")
             for seed in seeds:
+                unit_id = f"{regime.name}|delay={int(native_delay)}|seed={int(seed)}"
+                if resume and checkpoint_store is not None:
+                    completed_rows = checkpoint_store.load_rows(unit_id)
+                    if completed_rows is not None:
+                        rows.extend(completed_rows)
+                        if progress:
+                            print(f"resumed {unit_id}", flush=True)
+                        continue
+                unit_start = len(rows)
                 gamma = gamma_values(regime, int(seed))
                 dataset = simulate_calcium_dataset(
                     truth,
@@ -635,6 +650,8 @@ def run_resolvability_grid(
                                             **metrics,
                                         }
                                     )
+                if checkpoint_store is not None:
+                    checkpoint_store.save_rows(unit_id, rows[unit_start:])
             if progress:
                 print(
                     f"completed regime={regime.name} delay={native_delay}",
@@ -948,18 +965,14 @@ def write_outputs(
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(output_dir / "resolvability_rows.csv", rows)
     _write_csv(output_dir / "resolvability_cells.csv", cells)
-    (output_dir / "summary.json").write_text(
-        json.dumps(
-            {
-                "config": config,
-                "gates": evaluation,
-                "summary": list(cells),
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    atomic_write_json(
+        output_dir / "summary.json",
+        {
+            "status": "complete",
+            "config": config,
+            "gates": evaluation,
+            "summary": list(cells),
+        },
     )
     (output_dir / "report.md").write_text(
         _report(cells, evaluation), encoding="utf-8"
@@ -987,24 +1000,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tolerance", type=float, default=0.02)
     parser.add_argument("--min-run-samples", type=int, default=2)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse complete regime/delay/seed checkpoint units",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    rows = run_resolvability_grid(
-        regimes=REGIMES,
-        native_delays=args.native_delays,
-        downsample_factors=args.downsample_factors,
-        deadbands=args.deadbands,
-        seeds=args.seeds,
-        n_steps=args.n_steps,
-        tolerance=args.tolerance,
-        min_run_samples=args.min_run_samples,
-        progress=True,
-    )
-    cells = apply_adjacency_gate(summarize_cells(rows))
-    evaluation = evaluate_map(cells)
     config = {
         "seeds": list(args.seeds),
         "native_delays": list(args.native_delays),
@@ -1032,7 +1037,32 @@ def main() -> None:
         "acquisition_phase_rule": "average_all_offsets_0_to_downsample_minus_1",
         "decision_rule": "mean gates + >=80% seed passes + adjacent passing cell",
     }
+    checkpoint_store = JsonUnitCheckpointStore(
+        args.output_dir,
+        "temporal_resolvability",
+        config,
+    )
+    checkpoint_store.initialize(resume=args.resume)
+    rows = run_resolvability_grid(
+        regimes=REGIMES,
+        native_delays=args.native_delays,
+        downsample_factors=args.downsample_factors,
+        deadbands=args.deadbands,
+        seeds=args.seeds,
+        n_steps=args.n_steps,
+        tolerance=args.tolerance,
+        min_run_samples=args.min_run_samples,
+        progress=True,
+        checkpoint_store=checkpoint_store,
+        resume=args.resume,
+    )
+    cells = apply_adjacency_gate(summarize_cells(rows))
+    evaluation = evaluate_map(cells)
     write_outputs(args.output_dir, rows, cells, evaluation, config)
+    checkpoint_store.finish(
+        completed_units=len(REGIMES) * len(args.native_delays) * len(args.seeds),
+        total_units=len(REGIMES) * len(args.native_delays) * len(args.seeds),
+    )
     print(json.dumps(evaluation, indent=2, sort_keys=True))
 
 

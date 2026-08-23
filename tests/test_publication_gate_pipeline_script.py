@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -120,7 +121,10 @@ class PublicationGatePipelineScriptTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)
-            (output_dir / "summary.json").write_text("{}", encoding="utf-8")
+            (output_dir / "summary.json").write_text(
+                json.dumps({"status": "complete"}),
+                encoding="utf-8",
+            )
             config = script.PipelineConfig(
                 python="python",
                 dynamic_output_dir=output_dir,
@@ -132,6 +136,59 @@ class PublicationGatePipelineScriptTests(unittest.TestCase):
                 steps[0].skip_reason,
                 f"already complete: {output_dir / 'summary.json'}",
             )
+
+    def test_skip_completed_requires_complete_status(self) -> None:
+        script = _load_script_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            (output_dir / "summary.json").write_text(
+                json.dumps({"status": "running"}),
+                encoding="utf-8",
+            )
+            config = script.PipelineConfig(
+                python="python",
+                dynamic_output_dir=output_dir,
+                skip_completed=True,
+            )
+            steps = script.build_steps(config)
+
+            self.assertIsNone(steps[0].skip_reason)
+
+    def test_resume_forwards_to_every_long_running_gate(self) -> None:
+        script = _load_script_module()
+
+        config = script.PipelineConfig(
+            python="python",
+            resume=True,
+            resume_dynamic=True,
+        )
+        steps = script.build_steps(config)
+
+        self.assertIn("--resume", steps[0].command)
+        self.assertIn("--resume", steps[1].command)
+        self.assertIn("--resume", steps[2].command)
+
+    def test_custom_heavy_output_dirs_are_forwarded_to_derived_reports(self) -> None:
+        script = _load_script_module()
+
+        config = script.PipelineConfig(
+            python="python",
+            dynamic_output_dir=Path("scratch/dynamic"),
+            null_output_dir=Path("scratch/null"),
+            stability_output_dir=Path("scratch/stability"),
+            skip_completed=True,
+        )
+        steps = script.build_steps(config)
+
+        for step in steps[3:5]:
+            self.assertIn("scratch/dynamic", step.command)
+            self.assertIn("scratch/null", step.command)
+            self.assertIn("scratch/stability", step.command)
+            self.assertIsNone(step.skip_reason)
+        self.assertIn("scratch/dynamic", steps[5].command)
+        self.assertIn("scratch/stability", steps[5].command)
+        self.assertIsNone(steps[5].skip_reason)
 
     def test_formats_commands_without_shell_execution(self) -> None:
         script = _load_script_module()

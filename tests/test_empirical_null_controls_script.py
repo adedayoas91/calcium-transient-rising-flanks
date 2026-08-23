@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +51,35 @@ class RecordingEstimator:
             adjacency=adjacency,
             best_lags=np.zeros((n_nodes, n_nodes), dtype=int),
             estimator="recording",
+        )
+
+
+class ArtifactEstimator:
+    def fit(
+        self,
+        traces: np.ndarray,
+        *,
+        event_indices: tuple[np.ndarray, ...] | None = None,
+    ) -> GraphResult:
+        del event_indices
+        n_nodes = traces.shape[0]
+        scores = np.zeros((n_nodes, n_nodes), dtype=float)
+        p_values = np.ones((n_nodes, n_nodes), dtype=float)
+        adjacency = np.zeros((n_nodes, n_nodes), dtype=bool)
+        best_lags = np.zeros((n_nodes, n_nodes), dtype=int)
+        if n_nodes > 1:
+            scores[0, 1] = 2.5
+            scores[1, 0] = 1.25
+            p_values[0, 1] = 0.01
+            p_values[1, 0] = 0.2
+            adjacency[0, 1] = True
+            best_lags[0, 1] = 2
+        return GraphResult(
+            scores=scores,
+            p_values=p_values,
+            adjacency=adjacency,
+            best_lags=best_lags,
+            estimator="artifact",
         )
 
 
@@ -211,6 +241,216 @@ class EmpiricalNullControlScriptTests(unittest.TestCase):
             representations=("rise",),
             n_null_replicates=0,
         )
+
+        self.assertEqual(recovered, rows)
+        self.assertEqual(completed, {"cgc|C|F3T1"})
+
+    def test_observed_graph_artifacts_capture_edge_level_matrices_and_metadata(self) -> None:
+        script = _load_script_module()
+        traces = np.array(
+            [
+                [0.0, 1.0, 0.0, 2.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0, 0.0, 2.0, 0.0],
+            ]
+        )
+        record = {
+            "case": "D",
+            "description": "artifact test",
+            "recording": "F5T2",
+            "fish": 5,
+            "trial": 2,
+            "traces": traces,
+            "mid": 1,
+        }
+        staged: list[dict[str, object]] = []
+
+        rows = script.null_rows_for_recording(
+            record,
+            donor_traces=None,
+            estimator_factory=lambda _seed: ArtifactEstimator(),
+            method="cgc-star",
+            representations=("rise", "full", "fall"),
+            n_null_replicates=0,
+            observed_artifacts=staged,
+            fdr=True,
+        )
+
+        self.assertEqual(len(rows), 6)
+        self.assertEqual(
+            [(entry["method"], entry["representation"]) for entry in staged],
+            [("cgc-star", "rise"), ("cgc-star", "fall")],
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output_dir = Path(temporary)
+            manifest_entries = script._write_observed_graph_artifacts(
+                output_dir,
+                staged_artifacts=staged,
+                manifest_entries=[],
+            )
+            manifest_path = output_dir / script.OBSERVED_GRAPH_ARTIFACTS_MANIFEST_FILE
+            payload = json.loads(manifest_path.read_text())
+
+            self.assertEqual(payload["schema_version"], 1)
+            self.assertEqual(
+                [entry["path"] for entry in payload["artifacts"]],
+                [
+                    "observed_graph_artifacts/d__f5t2__cgc-star__fall.npz",
+                    "observed_graph_artifacts/d__f5t2__cgc-star__rise.npz",
+                ],
+            )
+            self.assertEqual(len(manifest_entries), 2)
+
+            rise_path = output_dir / manifest_entries[1]["path"]
+            with np.load(rise_path) as saved:
+                np.testing.assert_array_equal(
+                    saved["adjacency"],
+                    np.array([[False, True], [False, False]], dtype=bool),
+                )
+                np.testing.assert_array_equal(
+                    saved["retained_scores"],
+                    np.array([[0.0, 2.5], [0.0, 0.0]], dtype=float),
+                )
+                np.testing.assert_array_equal(
+                    saved["p_values"],
+                    np.array([[1.0, 0.01], [0.2, 1.0]], dtype=float),
+                )
+                np.testing.assert_array_equal(
+                    saved["best_lags"],
+                    np.array([[0, 2], [0, 0]], dtype=int),
+                )
+                metadata = json.loads(saved["metadata_json"].item())
+            self.assertTrue(metadata["fdr"])
+            self.assertEqual(metadata["multiple_testing"], "benjamini-hochberg")
+            self.assertEqual(metadata["edge_testing_family"], script.EDGE_TESTING_FAMILY)
+
+    def test_observed_graph_artifact_manifest_marks_unadjusted_runs(self) -> None:
+        script = _load_script_module()
+        record = {
+            "case": "A",
+            "description": "artifact test",
+            "recording": "F1T1",
+            "fish": 1,
+            "trial": 1,
+            "traces": np.zeros((2, 6)),
+            "mid": 1,
+        }
+        staged: list[dict[str, object]] = []
+
+        script.null_rows_for_recording(
+            record,
+            donor_traces=None,
+            estimator_factory=lambda _seed: ArtifactEstimator(),
+            method="cgc",
+            representations=("rise",),
+            n_null_replicates=0,
+            observed_artifacts=staged,
+            fdr=False,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest_entries = script._write_observed_graph_artifacts(
+                Path(temporary),
+                staged_artifacts=staged,
+                manifest_entries=[],
+            )
+
+        self.assertFalse(manifest_entries[0]["fdr"])
+        self.assertEqual(manifest_entries[0]["multiple_testing"], "unadjusted")
+
+    def test_resume_requires_observed_graph_artifacts_for_complete_units(self) -> None:
+        script = _load_script_module()
+        record = {
+            "case": "C",
+            "recording": "F3T1",
+            "description": "resume",
+            "fish": 3,
+            "trial": 1,
+            "traces": np.zeros((2, 8)),
+            "mid": 1,
+        }
+        rows = [
+            {
+                "method": "cgc",
+                "case": "C",
+                "recording": "F3T1",
+                "representation": representation,
+                "null_type": null_type,
+                "replicate": 0,
+            }
+            for representation, null_type in (
+                ("rise", "observed"),
+                ("rise", "reverse_time"),
+                ("fall", "observed"),
+                ("fall", "reverse_time"),
+            )
+        ]
+        manifest_entries = [
+            {
+                "case": "C",
+                "description": "resume",
+                "recording": "F3T1",
+                "fish": 3,
+                "trial": 1,
+                "method": "cgc",
+                "representation": "rise",
+                "null_type": "observed",
+                "replicate": 0,
+                "fdr": True,
+                "multiple_testing": "benjamini-hochberg",
+                "edge_testing_family": script.EDGE_TESTING_FAMILY,
+                "estimator": "artifact",
+                "n_rois": 2,
+                "path": "observed_graph_artifacts/c__f3t1__cgc__rise.npz",
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output_dir = Path(temporary)
+            recovered, completed = script._recover_completed_units(
+                rows,
+                records=[record],
+                methods=("cgc",),
+                representations=("rise", "fall"),
+                n_null_replicates=0,
+                artifact_entries=manifest_entries,
+                output_dir=output_dir,
+            )
+            self.assertEqual(recovered, [])
+            self.assertEqual(completed, set())
+
+            script._write_observed_graph_artifacts(
+                output_dir,
+                staged_artifacts=[
+                    {
+                        **manifest_entries[0],
+                        "adjacency": np.array([[False, True], [False, False]], dtype=bool),
+                        "retained_scores": np.array([[0.0, 1.0], [0.0, 0.0]], dtype=float),
+                        "p_values": np.array([[1.0, 0.02], [0.5, 1.0]], dtype=float),
+                        "best_lags": np.array([[0, 1], [0, 0]], dtype=int),
+                    },
+                    {
+                        **manifest_entries[0],
+                        "representation": "fall",
+                        "path": "observed_graph_artifacts/c__f3t1__cgc__fall.npz",
+                        "adjacency": np.array([[False, True], [False, False]], dtype=bool),
+                        "retained_scores": np.array([[0.0, 1.0], [0.0, 0.0]], dtype=float),
+                        "p_values": np.array([[1.0, 0.02], [0.5, 1.0]], dtype=float),
+                        "best_lags": np.array([[0, 1], [0, 0]], dtype=int),
+                    },
+                ],
+                manifest_entries=[],
+            )
+            persisted_entries = script._load_observed_graph_artifact_entries(output_dir)
+            recovered, completed = script._recover_completed_units(
+                rows,
+                records=[record],
+                methods=("cgc",),
+                representations=("rise", "fall"),
+                n_null_replicates=0,
+                artifact_entries=persisted_entries,
+                output_dir=output_dir,
+            )
 
         self.assertEqual(recovered, rows)
         self.assertEqual(completed, {"cgc|C|F3T1"})

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -24,6 +25,38 @@ def _load_script_module():
 
 
 class TemporalResolvabilityScriptTests(unittest.TestCase):
+    def test_resume_reuses_completed_regime_seed_unit_without_recomputing(self) -> None:
+        script = _load_script_module()
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint_store = script.JsonUnitCheckpointStore(
+                Path(directory),
+                "temporal_resolvability",
+                {"regimes": ["clean_homogeneous"], "seeds": [1]},
+            )
+            checkpoint_store.initialize(resume=False)
+            expected_rows = [{"unit": "saved", "status": "ok"}]
+            checkpoint_store.save_rows(
+                "clean_homogeneous|delay=1|seed=1",
+                expected_rows,
+            )
+
+            with patch.object(
+                script,
+                "simulate_calcium_dataset",
+                side_effect=AssertionError("resume should skip recomputation"),
+            ):
+                rows = script.run_resolvability_grid(
+                    regimes=(script.REGIMES[0],),
+                    native_delays=(1,),
+                    downsample_factors=(1,),
+                    deadbands=(0,),
+                    seeds=(1,),
+                    checkpoint_store=checkpoint_store,
+                    resume=True,
+                )
+
+        self.assertEqual(rows, expected_rows)
+
     def test_state_metrics_keep_ambiguity_and_unmatched_separate(self) -> None:
         script = _load_script_module()
         rise = np.zeros((3, 24), dtype=float)
@@ -249,7 +282,8 @@ class TemporalResolvabilityScriptTests(unittest.TestCase):
             self.assertTrue((output / "resolvability_cells.csv").exists())
             self.assertTrue((output / "report.md").exists())
             payload = json.loads((output / "summary.json").read_text())
-            self.assertEqual(set(payload), {"config", "gates", "summary"})
+            self.assertEqual(set(payload), {"status", "config", "gates", "summary"})
+            self.assertEqual(payload["status"], "complete")
             self.assertIn(
                 "does not establish causal identification",
                 (output / "report.md").read_text(),

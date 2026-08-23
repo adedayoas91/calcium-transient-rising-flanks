@@ -143,11 +143,52 @@ REQUIRED_ARTIFACTS = (
 )
 
 
-def build_readiness_rows(output_root: Path) -> list[dict[str, Any]]:
+def _artifact_path(
+    artifact: RequiredArtifact,
+    *,
+    output_root: Path,
+    dynamic_output_dir: Path | None,
+    null_output_dir: Path | None,
+    stability_output_dir: Path | None,
+) -> Path:
+    if artifact.category == "dynamic_a_locked" and dynamic_output_dir is not None:
+        return dynamic_output_dir / Path(artifact.relative_path).name
+    if artifact.category == "empirical_null_controls" and null_output_dir is not None:
+        return null_output_dir / Path(artifact.relative_path).name
+    if artifact.category == "empirical_stability" and stability_output_dir is not None:
+        return stability_output_dir / Path(artifact.relative_path).name
+    return output_root / artifact.relative_path
+
+
+def _artifact_available(artifact: RequiredArtifact, path: Path) -> bool:
+    if not path.is_file():
+        return False
+    if artifact.category != "dynamic_a_locked" or path.name != "summary.json":
+        return True
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return payload.get("status") == "complete"
+
+
+def build_readiness_rows(
+    output_root: Path,
+    *,
+    dynamic_output_dir: Path | None = None,
+    null_output_dir: Path | None = None,
+    stability_output_dir: Path | None = None,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for artifact in REQUIRED_ARTIFACTS:
-        path = output_root / artifact.relative_path
-        available = path.is_file()
+        path = _artifact_path(
+            artifact,
+            output_root=output_root,
+            dynamic_output_dir=dynamic_output_dir,
+            null_output_dir=null_output_dir,
+            stability_output_dir=stability_output_dir,
+        )
+        available = _artifact_available(artifact, path)
         row = asdict(artifact)
         row.update(
             {
@@ -225,13 +266,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir", type=Path, default=Path("outputs/result_readiness")
     )
+    parser.add_argument("--dynamic-output-dir", type=Path, default=None)
+    parser.add_argument("--null-output-dir", type=Path, default=None)
+    parser.add_argument("--stability-output-dir", type=Path, default=None)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    rows = build_readiness_rows(args.output_root)
-    summary = summarize_readiness(rows)
+    rows = build_readiness_rows(
+        args.output_root,
+        dynamic_output_dir=args.dynamic_output_dir,
+        null_output_dir=args.null_output_dir,
+        stability_output_dir=args.stability_output_dir,
+    )
+    summary = {
+        "status": "complete",
+        "output_root": str(args.output_root),
+        "dynamic_output_dir": str(args.dynamic_output_dir)
+        if args.dynamic_output_dir is not None
+        else None,
+        "null_output_dir": str(args.null_output_dir)
+        if args.null_output_dir is not None
+        else None,
+        "stability_output_dir": str(args.stability_output_dir)
+        if args.stability_output_dir is not None
+        else None,
+        **summarize_readiness(rows),
+    }
     report = build_markdown_report(rows, summary)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

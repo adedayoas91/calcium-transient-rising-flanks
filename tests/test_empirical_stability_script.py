@@ -1,6 +1,10 @@
 import importlib.util
+import json
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -42,6 +46,99 @@ class StableEstimator:
 
 
 class EmpiricalStabilityScriptTests(unittest.TestCase):
+    def test_main_resume_reuses_completed_checkpoint_unit(self) -> None:
+        script = _load_script_module()
+        record = {
+            "case": "D",
+            "description": "test",
+            "recording": "F1T1",
+            "fish": 1,
+            "trial": 1,
+            "mid": 1,
+            "traces": np.zeros((2, 8), dtype=float),
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output_dir = root / "outputs"
+            data_dir = root / "data"
+            config = {
+                "data_dir": str(data_dir),
+                "cases": ["D"],
+                "recordings": "F1T1",
+                "representations": list(script.DEFAULT_REPRESENTATIONS),
+                "methods": ["cgc"],
+                "n_event_bootstrap": 20,
+                "window_length": 120,
+                "window_step": None,
+                "include_leave_one_neuron": True,
+                "include_leave_one_transient": True,
+                "max_lag": 1,
+                "n_estimator_surrogates": 0,
+                "alpha": 0.05,
+                "score_threshold": 0.0,
+                "event_mode": "physical",
+                "fdr": True,
+                "seed": 0,
+            }
+            checkpoint_store = script.JsonUnitCheckpointStore(
+                output_dir,
+                "empirical_stability",
+                config,
+            )
+            checkpoint_store.initialize(resume=False)
+            checkpoint_store.save_rows(
+                "cgc|D|F1T1",
+                [
+                    {
+                        "case": "D",
+                        "description": "test",
+                        "recording": "F1T1",
+                        "fish": 1,
+                        "trial": 1,
+                        "method": "cgc",
+                        "representation": "rise",
+                        "event_selected": True,
+                        "stability_type": "event_bootstrap",
+                        "status": "ok",
+                        "skip_reason": None,
+                        "n_graphs": 1,
+                        "stability": 1.0,
+                        "mean_w_ic": 1.0,
+                        "mean_w_rc": None,
+                        "mean_edge_density": 0.5,
+                        "mean_retained_edges": 1.0,
+                        "mean_total_weight": 1.0,
+                    }
+                ],
+            )
+            checkpoint_store.finish(completed_units=1, total_units=1)
+
+            argv = [
+                "run_empirical_stability.py",
+                "--data-dir",
+                str(data_dir),
+                "--output-dir",
+                str(output_dir),
+                "--cases",
+                "D",
+                "--recordings",
+                "F1T1",
+                "--resume",
+            ]
+            with patch.object(sys, "argv", argv):
+                with patch.object(script, "load_case_traces", return_value=[record]):
+                    with patch.object(
+                        script,
+                        "stability_rows_for_recording",
+                        side_effect=AssertionError("resume should skip recomputation"),
+                    ):
+                        script.main()
+
+            payload = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "complete")
+            self.assertEqual(payload["n_rows"], 1)
+
     def test_parse_methods_accepts_combined_cgc_variants(self) -> None:
         script = _load_script_module()
 
