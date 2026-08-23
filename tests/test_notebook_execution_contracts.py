@@ -205,6 +205,10 @@ class NotebookExecutionContractTests(unittest.TestCase):
                     source,
                     r"OUTPUT_(?:DIR|ROOT)\s*=\s*PACKAGE_ROOT\s*/",
                 )
+                self.assertIn("RUNNER_ENV['PYTHONPATH']", source)
+                self.assertIn("env=RUNNER_ENV", source)
+                self.assertIn("RUNNER_PYTHON =", source)
+                self.assertNotIn("sys.executable, 'examples/", source)
                 self.assertEqual(find_package_root(path.parent), package_root)
                 self.assertEqual(find_package_root(package_root), package_root)
                 self.assertEqual(find_package_root(outer_root), package_root)
