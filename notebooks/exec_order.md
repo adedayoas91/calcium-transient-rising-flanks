@@ -2,6 +2,167 @@
 
 Run notebooks from the `calcium-transient-rising-flank` package root so relative paths resolve cleanly. The newer wrapper notebooks default to dry-run mode; set their `RUN_*` toggles to `True` when you want them to launch the underlying scripts.
 
+## Reviewer-Revision Campaign (Recommended Next Run)
+
+The reviewer-revision implementation is complete, but its scientific outputs
+have intentionally not been generated on this machine. Run the campaign on the
+compute machine before updating any result claim. IAAFT and bout-preserving
+surrogates are excluded from this campaign by author decision.
+
+### 1. Prepare the optional baseline environment
+
+The core package remains lightweight. LPCMCI and OASIS are isolated in optional
+extras because they are external GPL-3.0 packages and LPCMCI is an experimental
+Tigramite method.
+
+```bash
+uv sync --extra pag --extra deconvolution
+```
+
+The committed `uv.lock` contains the resolved baseline dependencies. Use the
+same environment for every stage so OASIS and LPCMCI versions remain matched.
+
+### 2. Preferred one-command execution
+
+Preview the exact commands first:
+
+```bash
+uv run --extra pag --extra deconvolution python \
+  examples/run_reviewer_revision_campaign.py --resume --dry-run
+```
+
+Then launch the full resumable campaign:
+
+```bash
+uv run --extra pag --extra deconvolution python \
+  examples/run_reviewer_revision_campaign.py --resume
+```
+
+The corresponding preview-first notebook is:
+
+1. `notebooks/simulations/08_reviewer_revision_campaign_run.ipynb`
+
+Set `RUN_CAMPAIGN = True` only after inspecting the preview. The notebook passes
+`--resume`, and the campaign passes `--resume` to every potentially long child
+runner. Re-executing the cell skips a stage only when its `summary.json`
+contains `"status": "complete"`; partial stages continue from their checkpoints.
+
+The campaign writes its top-level state to
+`outputs/reviewer_revision_campaign/campaign_state.json` and executes these
+stages in the reviewer-recommended dependency order:
+
+| Stage | Implementation | Primary completion marker |
+|---|---|---|
+| 1 | Matched BH empirical re-estimation | `outputs/reviewer_revision_campaign/empirical_fdr/bh/summary.json` |
+| 2 | Matched unadjusted empirical re-estimation | `outputs/reviewer_revision_campaign/empirical_fdr/unadjusted/summary.json` |
+| 3 | Held-out MAD/AR-residual per-ROI thresholds plus score sweeps for recovery, `W_IC`, and `W_RC` | `outputs/reviewer_revision_campaign/threshold_calibration/summary.json` |
+| 4 | Mixed noncausal/causal-fall benchmark, overlap-allowed condition, and kinetic-misspecification condition | `outputs/reviewer_revision_campaign/mixed_fall/summary.json` |
+| 5 | OASIS event/preprocessing baseline and raw LPCMCI PAG baseline under controlled common input | `outputs/reviewer_revision_campaign/lpcmci_oasis/summary.json` |
+| 6 | Multi-lag, run-context, and bout-bounded physical-event hybrid grids | `outputs/reviewer_revision_campaign/hybrid_event/summary.json` |
+| 7 | Thresholded-increment, change-point, and kinetics-template onset comparison | `outputs/reviewer_revision_campaign/adaptive_onset/summary.json` |
+
+The two empirical arms use the same cases, recordings, representations,
+estimators, seeds, alpha level, and 1,000 estimator surrogates. The only arm
+difference is BH correction versus `--no-fdr`. Each arm has 72 top-level graph
+fits for cases C/D, recordings F3T1/F3T2/F5T2, rise/fall representations, and
+c-GC/c-GC*. The declared edge-testing family is the eligible non-self ordered
+ROI pairs within each recording/case/method/representation.
+
+### 3. Individual resumable notebooks
+
+Use these when a scheduler or failure requires running one family at a time:
+
+1. `notebooks/motorneurons/Reviewer_FDR_reestimation.ipynb`
+2. `notebooks/simulations/05_reviewer_calibration_onset_run.ipynb`
+3. `notebooks/simulations/06_reviewer_dynamic_extensions_run.ipynb`
+4. `notebooks/simulations/07_reviewer_baseline_benchmarks_run.ipynb`
+
+Every heavy launch command in these notebooks contains `--resume`; there is no
+notebook toggle that disables checkpoint reuse. The mixed-fall and hybrid grids
+write to separate directories, as do threshold calibration and adaptive onset,
+so later stages cannot overwrite earlier evidence.
+
+Direct equivalents are:
+
+```bash
+# Matched BH arm
+uv run python examples/run_empirical_null_controls.py \
+  --cases C,D --recordings F3T1,F3T2,F5T2 \
+  --representations rise,fall --methods cgc,cgc-star \
+  --n-null-replicates 0 --n-estimator-surrogates 1000 \
+  --alpha 0.05 --event-mode physical --seed 10 --resume \
+  --output-dir outputs/reviewer_revision_campaign/empirical_fdr/bh
+
+# Matched unadjusted arm
+uv run python examples/run_empirical_null_controls.py \
+  --cases C,D --recordings F3T1,F3T2,F5T2 \
+  --representations rise,fall --methods cgc,cgc-star \
+  --n-null-replicates 0 --n-estimator-surrogates 1000 \
+  --alpha 0.05 --event-mode physical --seed 10 --no-fdr --resume \
+  --output-dir outputs/reviewer_revision_campaign/empirical_fdr/unadjusted
+
+# Held-out per-ROI threshold and W_IC/W_RC calibration
+uv run python examples/reviewer_calibration_onset.py \
+  --components threshold --n-estimator-surrogates 1000 --resume \
+  --output-dir outputs/reviewer_revision_campaign/threshold_calibration
+
+# Mixed fall benchmark
+uv run python examples/reviewer_dynamic_extensions.py \
+  --methods cgc,cgc-star --grid lag1_context1 --n-seeds 8 \
+  --n-surrogates 1000 --resume \
+  --output-dir outputs/reviewer_revision_campaign/mixed_fall
+
+# OASIS and LPCMCI baselines
+uv run --extra pag --extra deconvolution python \
+  examples/reviewer_baseline_benchmarks.py --n-cgc-surrogates 1000 --resume \
+  --output-dir outputs/reviewer_revision_campaign/lpcmci_oasis
+
+# Hybrid physical-event grids
+uv run python examples/reviewer_dynamic_extensions.py \
+  --methods cgc,cgc-star \
+  --grid lag2_context2,bout_bounded_lag3_context4 --n-seeds 8 \
+  --n-surrogates 1000 --resume \
+  --output-dir outputs/reviewer_revision_campaign/hybrid_event
+
+# Adaptive-onset comparison
+uv run python examples/reviewer_calibration_onset.py \
+  --components onset --resume \
+  --output-dir outputs/reviewer_revision_campaign/adaptive_onset
+```
+
+### 4. Resume and failure rules
+
+- Rerun the identical command after an interruption. Each runner validates its
+  saved configuration before accepting partial rows.
+- Do not change seeds, methods, grids, thresholds, or output directories while
+  resuming. A configuration mismatch exits instead of mixing incompatible rows.
+- Do not delete partial CSV or progress JSON files independently. A progress
+  counter is advisory: the runners reconstruct completion from the full
+  expected row keys. Incomplete or duplicated units are discarded and rerun;
+  fully written units are recovered even if interruption occurred before the
+  progress JSON update.
+- Raw LPCMCI `graph`, `p_matrix`, and `val_matrix` tensors are retained under
+  `outputs/reviewer_revision_campaign/lpcmci_oasis/raw_pag/`. The binary lagged
+  projection is lossy, is scored only as an undirected skeleton, and must not
+  replace the PAG in reporting.
+- OASIS rows are event-recovery and preprocessing-ablation evidence; OASIS is
+  not reported as a causal discovery method.
+
+### 5. Post-run verification on the compute machine
+
+After all stage markers report complete, run the authored regression suite and
+inspect the campaign state before revising the manuscript:
+
+```bash
+uv run --extra pag --extra deconvolution python -m unittest discover -s tests -v
+```
+
+Then confirm that `campaign_state.json` and every stage `summary.json` reports
+`"status": "complete"`, inspect row counts against the saved configurations,
+and review raw PAG mark distributions before interpreting the lossy projection.
+No manuscript result should be changed from proposed/awaiting execution to
+completed solely because the code or notebook exists.
+
 ## 0. Explore The Generator
 
 1. `notebooks/simulations/00_hyperparameter_timeseries_explorer.ipynb`
@@ -107,16 +268,26 @@ locked grid and strict analysis write to
 toggle requires the locked grid's `resolvability_rows.csv` and does not fall
 back to results produced by another run.
 
-Only after checking the synthetic resolution boundary should you run the
-motoneuron screen. Set `RUN_SCREEN = True` in the empirical notebook. Its
-primary configuration uses case D, all recordings, fixed 240-frame validation
-windows, and writes to `outputs/motorneurons/temporal_screen_manual/`.
+The motoneuron screen was completed on 2026-08-22 for case D and all nine
+recordings. The estimable fixed-window analyses produced no joint diagnostic
+passes: 0/54 cells at 120 frames and 0/54 at the primary 240-frame setting.
+The 480-frame setting was not estimable because each recording provided only
+three non-overlapping windows, fewer than the four required for two-way
+cross-fitting. The population-bout sensitivity produced 2/54 passes (F1T2 and
+F6T2 at lag 1, deadband 0), but neither pass reproduced under fixed windows and
+neither recording is in the retained primary subset F3T1/F3T2/F5T2.
 
-The empirical notebook is a truth-free stability screen, not a causal graph
-validation. It reports three-state candidate density, held-out direction
-replication, and timing-shift null diagnostics. Repeat it with 120-, 240-, and
-480-frame windows before treating a diagnostic pass as permission to compare
-unrestricted, hard-pruned, and soft-prior c-GC fits.
+Run-level artifacts are under
+`outputs/motorneurons/temporal_screen_manual/{window_120,window_240,window_480,population_bouts}/`.
+The strict descriptive analysis, exact tables, and figures are under
+`outputs/motorneurons/temporal_screen_manual/analysis-output/`, with execution
+metadata in `outputs/motorneurons/temporal_screen_manual/experiment-log.md`.
+
+The empirical screen is truth-free and ran no c-GC or c-GC*. Its result is a
+no-go for applying a temporal hard mask or soft prior to the primary empirical
+graphs. The two population-bout passes may support only an explicitly
+exploratory, segmentation-sensitive learner comparison; they are not evidence
+of causal connectivity.
 
 ## Optional Smoke Checks
 

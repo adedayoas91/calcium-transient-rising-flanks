@@ -55,6 +55,12 @@ CASE_FILES = {
 DEFAULT_REPRESENTATIONS = ("full", "deconvolved", "rise", "fall", "fall_residual")
 SELECTED_REPRESENTATIONS = {"rise", "fall", "fall_residual"}
 METHOD_CHOICES = ("cgc", "fcgc", "cgc-star", "cgc*")
+PARTIAL_ROWS_FILE = "null_control_rows.partial.csv"
+PROGRESS_FILE = "progress.json"
+EDGE_TESTING_FAMILY = (
+    "eligible non-self ordered ROI pairs within each "
+    "recording/case/method/representation"
+)
 
 
 def _load_pickle(path: Path) -> Any:
@@ -452,10 +458,192 @@ def build_null_contrast_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = sorted({field for row in rows for field in row})
-    with path.open("w", newline="") as file:
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
+    temporary.replace(path)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(text)
+    temporary.replace(path)
+
+
+def _coerce_csv_value(value: str | None) -> Any:
+    if value is None:
+        return None
+    if value == "":
+        return None
+    if value in {"True", "False"}:
+        return value == "True"
+    try:
+        return int(value)
+    except ValueError:
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+
+def _read_csv(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    with path.open(newline="") as file:
+        return [
+            {key: _coerce_csv_value(value) for key, value in row.items()}
+            for row in csv.DictReader(file)
+        ]
+
+
+def _run_config(
+    args: argparse.Namespace,
+    *,
+    cases: tuple[str, ...],
+    representations: tuple[str, ...],
+    methods: tuple[str, ...],
+) -> dict[str, Any]:
+    return {
+        "resume_schema_version": 2,
+        "data_dir": str(args.data_dir),
+        "cases": list(cases),
+        "recordings": args.recordings,
+        "representations": list(representations),
+        "methods": list(methods),
+        "n_null_replicates": args.n_null_replicates,
+        "max_jitter": args.max_jitter,
+        "max_lag": args.max_lag,
+        "n_estimator_surrogates": args.n_estimator_surrogates,
+        "alpha": args.alpha,
+        "score_threshold": args.score_threshold,
+        "event_mode": args.event_mode,
+        "fdr": not args.no_fdr,
+        "seed": args.seed,
+        "edge_testing_family": EDGE_TESTING_FAMILY,
+    }
+
+
+def _unit_key(method: str, record: dict[str, Any]) -> str:
+    return "|".join((method, str(record["case"]), str(record["recording"])))
+
+
+def _expected_rows_for_recording(
+    *,
+    donor_available: bool,
+    representations: tuple[str, ...],
+    n_null_replicates: int,
+) -> int:
+    base_per_representation = 2 + int(donor_available)
+    selected_count = sum(
+        representation in SELECTED_REPRESENTATIONS
+        for representation in representations
+    )
+    continuous_count = len(representations) - selected_count
+    return (
+        len(representations) * base_per_representation
+        + n_null_replicates * (continuous_count + 3 * selected_count)
+    )
+
+
+def _recover_completed_units(
+    rows: list[dict[str, Any]],
+    *,
+    records: list[dict[str, Any]],
+    methods: tuple[str, ...],
+    representations: tuple[str, ...],
+    n_null_replicates: int,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    expected_counts = {
+        _unit_key(method, record): _expected_rows_for_recording(
+            donor_available=_next_donor(records, index) is not None,
+            representations=representations,
+            n_null_replicates=n_null_replicates,
+        )
+        for method in methods
+        for index, record in enumerate(records)
+    }
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        unit = "|".join(
+            (str(row["method"]), str(row["case"]), str(row["recording"]))
+        )
+        grouped.setdefault(unit, []).append(row)
+    unknown = set(grouped) - set(expected_counts)
+    if unknown:
+        raise SystemExit(
+            "resume partial rows contain unexpected units: "
+            + ", ".join(sorted(unknown))
+        )
+    completed: set[str] = set()
+    for unit, unit_rows in grouped.items():
+        row_keys = {
+            (
+                str(row["representation"]),
+                str(row["null_type"]),
+                int(row["replicate"]),
+            )
+            for row in unit_rows
+        }
+        expected_count = expected_counts[unit]
+        if len(unit_rows) == expected_count and len(row_keys) == expected_count:
+            completed.add(unit)
+    recovered_rows = [
+        row
+        for row in rows
+        if "|".join(
+            (str(row["method"]), str(row["case"]), str(row["recording"]))
+        )
+        in completed
+    ]
+    return recovered_rows, completed
+
+
+def _expected_top_level_fit_count(
+    *,
+    records: list[dict[str, Any]],
+    methods: tuple[str, ...],
+    representations: tuple[str, ...],
+    n_null_replicates: int,
+) -> int:
+    selected_count = sum(
+        representation in SELECTED_REPRESENTATIONS
+        for representation in representations
+    )
+    continuous_count = len(representations) - selected_count
+    total = 0
+    for method in methods:
+        for index, _record in enumerate(records):
+            base_per_representation = 2 + int(_next_donor(records, index) is not None)
+            total += len(representations) * base_per_representation
+            total += n_null_replicates * (
+                continuous_count + 3 * selected_count
+            )
+    return total
+
+
+def _write_progress(
+    output_dir: Path,
+    *,
+    config: dict[str, Any],
+    completed_units: set[str],
+    expected_units: int,
+    expected_top_level_fits: int,
+    status: str,
+) -> None:
+    payload = {
+        "status": status,
+        "config": config,
+        "completed_units": sorted(completed_units),
+        "completed_unit_count": len(completed_units),
+        "expected_unit_count": expected_units,
+        "expected_top_level_fit_count": expected_top_level_fits,
+    }
+    _atomic_write_text(
+        output_dir / PROGRESS_FILE,
+        json.dumps(payload, indent=2) + "\n",
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -489,6 +677,11 @@ def parse_args() -> argparse.Namespace:
         help="comma-separated estimator methods for combined output, e.g. cgc,cgc-star",
     )
     parser.add_argument("--no-fdr", action="store_true")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse completed method/case/recording units from this output directory",
+    )
     parser.add_argument("--seed", type=int, default=0)
     return parser.parse_args()
 
@@ -514,11 +707,55 @@ def main() -> None:
         recordings=_parse_recordings(args.recordings),
     )
     methods = _parse_methods(args.methods or args.method)
+    config = _run_config(
+        args,
+        cases=cases,
+        representations=representations,
+        methods=methods,
+    )
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = args.output_dir / PROGRESS_FILE
+    partial_rows_path = args.output_dir / PARTIAL_ROWS_FILE
+    completed_units: set[str] = set()
     rows: list[dict[str, Any]] = []
+    if args.resume and progress_path.exists():
+        with progress_path.open() as file:
+            progress = json.load(file)
+        if progress.get("config") != config:
+            raise SystemExit(
+                "resume configuration does not match the saved empirical run"
+            )
+        rows = _read_csv(partial_rows_path)
+        rows, completed_units = _recover_completed_units(
+            rows,
+            records=records,
+            methods=methods,
+            representations=representations,
+            n_null_replicates=args.n_null_replicates,
+        )
+
+    expected_units = len(methods) * len(records)
+    expected_top_level_fits = _expected_top_level_fit_count(
+        records=records,
+        methods=methods,
+        representations=representations,
+        n_null_replicates=args.n_null_replicates,
+    )
+    _write_progress(
+        args.output_dir,
+        config=config,
+        completed_units=completed_units,
+        expected_units=expected_units,
+        expected_top_level_fits=expected_top_level_fits,
+        status="running",
+    )
     for method_index, method in enumerate(methods):
         factory = _estimator_factory(args, method=method)
         seed_offset = args.seed + method_index * 100_000
         for index, record in enumerate(records):
+            unit = _unit_key(method, record)
+            if unit in completed_units:
+                continue
             rows.extend(
                 null_rows_for_recording(
                     record,
@@ -531,18 +768,30 @@ def main() -> None:
                     seed=seed_offset + index,
                 )
             )
+            completed_units.add(unit)
+            _write_csv(partial_rows_path, rows)
+            _write_progress(
+                args.output_dir,
+                config=config,
+                completed_units=completed_units,
+                expected_units=expected_units,
+                expected_top_level_fits=expected_top_level_fits,
+                status="running",
+            )
 
     if not rows:
         raise SystemExit("no null-control rows were generated")
     summaries = summarize_null_rows(rows)
     contrasts = build_null_contrast_rows(rows)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(args.output_dir / "null_control_rows.csv", rows)
     _write_csv(args.output_dir / "null_control_summary.csv", summaries)
     _write_csv(args.output_dir / "null_control_contrasts.csv", contrasts)
-    with (args.output_dir / "summary.json").open("w") as file:
-        json.dump(
+    _atomic_write_text(
+        args.output_dir / "summary.json",
+        json.dumps(
             {
+                "status": "complete",
+                "config": config,
                 "data_dir": str(args.data_dir),
                 "cases": cases,
                 "recordings": args.recordings,
@@ -552,16 +801,26 @@ def main() -> None:
                 "n_rows": len(rows),
                 "n_summary_rows": len(summaries),
                 "n_contrast_rows": len(contrasts),
+                "expected_top_level_fit_count": expected_top_level_fits,
+                "edge_testing_family": EDGE_TESTING_FAMILY,
                 "outputs": [
                     "null_control_rows.csv",
                     "null_control_summary.csv",
                     "null_control_contrasts.csv",
                 ],
             },
-            file,
             indent=2,
         )
-        file.write("\n")
+        + "\n",
+    )
+    _write_progress(
+        args.output_dir,
+        config=config,
+        completed_units=completed_units,
+        expected_units=expected_units,
+        expected_top_level_fits=expected_top_level_fits,
+        status="complete",
+    )
     print(f"wrote {len(rows)} null-control rows to {args.output_dir}")
 
 

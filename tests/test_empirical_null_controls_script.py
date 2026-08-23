@@ -1,4 +1,5 @@
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -137,6 +138,82 @@ class EmpiricalNullControlScriptTests(unittest.TestCase):
         self.assertAlmostEqual(
             contrasts[0]["p_null_ge_observed_w_ic_mean"], 2 / 3
         )
+
+    def test_expected_fit_count_matches_matched_fdr_campaign(self) -> None:
+        script = _load_script_module()
+        records = [
+            {
+                "case": case,
+                "recording": recording,
+                "fish": fish,
+                "traces": np.zeros((2, 8)),
+            }
+            for case in ("C", "D")
+            for recording, fish in (("F3T1", 3), ("F3T2", 3), ("F5T2", 5))
+        ]
+
+        count = script._expected_top_level_fit_count(
+            records=records,
+            methods=("cgc", "cgc-star"),
+            representations=("rise", "fall"),
+            n_null_replicates=0,
+        )
+
+        self.assertEqual(count, 72)
+
+    def test_partial_csv_round_trip_preserves_numeric_values(self) -> None:
+        script = _load_script_module()
+        rows = [
+            {
+                "case": "C",
+                "method": "cgc",
+                "recording": "F3T1",
+                "replicate": 0,
+                "w_ic": 0.75,
+                "w_rc": None,
+                "binary": False,
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "rows.csv"
+            script._write_csv(path, rows)
+            restored = script._read_csv(path)
+
+        self.assertEqual(restored[0]["replicate"], 0)
+        self.assertAlmostEqual(restored[0]["w_ic"], 0.75)
+        self.assertIsNone(restored[0]["w_rc"])
+        self.assertFalse(restored[0]["binary"])
+
+    def test_resume_recovers_complete_rows_without_progress_update(self) -> None:
+        script = _load_script_module()
+        record = {
+            "case": "C",
+            "recording": "F3T1",
+            "fish": 3,
+            "traces": np.zeros((2, 8)),
+        }
+        rows = [
+            {
+                "method": "cgc",
+                "case": "C",
+                "recording": "F3T1",
+                "representation": "rise",
+                "null_type": null_type,
+                "replicate": 0,
+            }
+            for null_type in ("observed", "reverse_time")
+        ]
+
+        recovered, completed = script._recover_completed_units(
+            rows,
+            records=[record],
+            methods=("cgc",),
+            representations=("rise",),
+            n_null_replicates=0,
+        )
+
+        self.assertEqual(recovered, rows)
+        self.assertEqual(completed, {"cgc|C|F3T1"})
 
 
 if __name__ == "__main__":

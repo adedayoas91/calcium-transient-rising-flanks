@@ -69,6 +69,9 @@ def downsample_dataset(dataset: SyntheticDataset, factor: int) -> SyntheticDatas
             active_nodes=None
             if episode.active_nodes is None
             else episode.active_nodes.copy(),
+            fall_adjacency=None
+            if episode.fall_adjacency is None
+            else episode.fall_adjacency.copy(),
         )
         for episode in dataset.episodes
     )
@@ -97,6 +100,12 @@ def downsample_dataset(dataset: SyntheticDataset, factor: int) -> SyntheticDatas
         node_prevalence=None
         if dataset.node_prevalence is None
         else dataset.node_prevalence.copy(),
+        fall_truth_adjacency=None
+        if dataset.fall_truth_adjacency is None
+        else dataset.fall_truth_adjacency.copy(),
+        fall_truth_adjacencies=tuple(
+            graph.copy() for graph in dataset.fall_truth_adjacencies
+        ),
     )
 
 

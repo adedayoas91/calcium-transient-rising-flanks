@@ -9,3 +9,12 @@ dependencies = [
     "numpy>=2.4.6",
     "pandas>=2.3.0",
 ]
+
+[project.optional-dependencies]
+pag = [
+    "numba>=0.64.0",
+    "tigramite>=5.2.10.1",
+]
+deconvolution = [
+    "oasis-deconv>=0.3.2",
+]

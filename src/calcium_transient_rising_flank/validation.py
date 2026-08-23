@@ -29,6 +29,7 @@ class SyntheticEpisode:
     fall_stop: int
     adjacency: np.ndarray
     active_nodes: np.ndarray | None = None
+    fall_adjacency: np.ndarray | None = None
 
     @property
     def rise_length(self) -> int:
@@ -51,7 +52,7 @@ class SyntheticEpisode:
 
 @dataclass(frozen=True)
 class DynamicSimulationConfig:
-    """Controls for simulations where only rise phases carry causal propagation.
+    """Controls for episodic simulations with optional rise and fall propagation.
 
     ``rise_waveform_length`` spreads each rise-phase onset over a finite number
     of samples in the calcium drive. A value of 1 preserves impulse-like
@@ -94,6 +95,12 @@ class DynamicSimulationConfig:
     gamma_fall: float | np.ndarray | None = None
     adjacency_sequence: tuple[np.ndarray, ...] | None = None
     active_node_sequence: tuple[np.ndarray, ...] | None = None
+    fall_adjacency_sequence: tuple[np.ndarray, ...] | None = None
+    fall_initial_activation_probability: float = 0.0
+    fall_spontaneous_rate: float = 0.0
+    fall_transmission_probability: float = 0.0
+    fall_overlap_exclusion_samples: int = 0
+    fall_propagation_drop_fraction: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -110,6 +117,8 @@ class SyntheticDataset:
     edge_prevalence: np.ndarray | None = None
     node_presence_counts: np.ndarray | None = None
     node_prevalence: np.ndarray | None = None
+    fall_truth_adjacency: np.ndarray | None = None
+    fall_truth_adjacencies: tuple[np.ndarray, ...] = ()
 
     @property
     def union_adjacency(self) -> np.ndarray:
@@ -130,6 +139,27 @@ class SyntheticDataset:
         if self.edge_presence_counts is None:
             return None
         return self.edge_presence_counts.copy()
+
+    @property
+    def fall_union_adjacency(self) -> np.ndarray | None:
+        """Return the explicit fall-phase truth when the simulator provides it."""
+
+        if self.fall_truth_adjacency is None:
+            return None
+        return np.asarray(self.fall_truth_adjacency, dtype=bool).copy()
+
+    @property
+    def episode_fall_adjacencies(self) -> tuple[np.ndarray, ...]:
+        """Return the explicit event-specific fall truth graphs."""
+
+        if self.fall_truth_adjacencies:
+            return tuple(graph.copy() for graph in self.fall_truth_adjacencies)
+        return tuple(
+            np.zeros_like(episode.adjacency, dtype=bool)
+            if episode.fall_adjacency is None
+            else episode.fall_adjacency.copy()
+            for episode in self.episodes
+        )
 
 
 @dataclass(frozen=True)
@@ -311,11 +341,26 @@ def _validate_dynamic_config(
         raise ValueError("fall_initial_scale cannot be negative")
     if config.fall_initial_ceiling_fraction < 0:
         raise ValueError("fall_initial_ceiling_fraction cannot be negative")
+    if (
+        not isinstance(config.fall_overlap_exclusion_samples, (int, np.integer))
+        or config.fall_overlap_exclusion_samples < 0
+    ):
+        raise ValueError("fall_overlap_exclusion_samples must be a nonnegative integer")
     if config.fall_state_mode not in {"passive_decay", "stochastic_independent"}:
         raise ValueError(
             "fall_state_mode must be 'passive_decay' or 'stochastic_independent'"
         )
     _probability(config.initial_activation_probability, "initial_activation_probability")
+    _probability(
+        config.fall_initial_activation_probability,
+        "fall_initial_activation_probability",
+    )
+    _probability(config.fall_spontaneous_rate, "fall_spontaneous_rate")
+    _probability(config.fall_transmission_probability, "fall_transmission_probability")
+    _probability(
+        config.fall_propagation_drop_fraction,
+        "fall_propagation_drop_fraction",
+    )
     _probability(config.edge_dropout_probability, "edge_dropout_probability")
     _probability(config.edge_addition_probability, "edge_addition_probability")
     _probability(config.source_dropout_probability, "source_dropout_probability")
@@ -342,17 +387,28 @@ def _validate_dynamic_config(
                     "each dynamic adjacency must match the base adjacency shape"
                 )
     if config.active_node_sequence is None:
+        pass
+    else:
+        if not config.active_node_sequence:
+            raise ValueError("active_node_sequence cannot be empty")
+        for active_nodes in config.active_node_sequence:
+            values = np.asarray(active_nodes, dtype=bool)
+            if values.shape != (adjacency.shape[0],):
+                raise ValueError(
+                    "each active-node mask must provide one value per ROI"
+                )
+            if not values.any():
+                raise ValueError("each active-node mask must retain at least one ROI")
+    if config.fall_adjacency_sequence is None:
         return
-    if not config.active_node_sequence:
-        raise ValueError("active_node_sequence cannot be empty")
-    for active_nodes in config.active_node_sequence:
-        values = np.asarray(active_nodes, dtype=bool)
-        if values.shape != (adjacency.shape[0],):
+    if not config.fall_adjacency_sequence:
+        raise ValueError("fall_adjacency_sequence cannot be empty")
+    for graph in config.fall_adjacency_sequence:
+        values = np.asarray(graph)
+        if values.shape != adjacency.shape:
             raise ValueError(
-                "each active-node mask must provide one value per ROI"
+                "each fall-truth adjacency must match the base adjacency shape"
             )
-        if not values.any():
-            raise ValueError("each active-node mask must retain at least one ROI")
 
 
 def _episode_active_nodes(
@@ -431,6 +487,30 @@ def _episode_adjacency(
     return graph
 
 
+def _episode_fall_adjacency(
+    base_adjacency: np.ndarray,
+    rise_graph: np.ndarray,
+    config: DynamicSimulationConfig,
+    episode_index: int,
+    active_nodes: np.ndarray,
+) -> np.ndarray:
+    if config.fall_adjacency_sequence is None:
+        graph = np.zeros_like(base_adjacency, dtype=bool)
+    else:
+        graph = np.asarray(
+            config.fall_adjacency_sequence[
+                episode_index % len(config.fall_adjacency_sequence)
+            ],
+            dtype=bool,
+        ).copy()
+    if graph.shape != rise_graph.shape:
+        raise ValueError("fall-truth adjacency must match the rise adjacency shape")
+    graph[~active_nodes, :] = False
+    graph[:, ~active_nodes] = False
+    np.fill_diagonal(graph, False)
+    return graph
+
+
 def _simulate_dynamic_calcium_dataset(
     adjacency: np.ndarray,
     n_steps: int,
@@ -442,7 +522,7 @@ def _simulate_dynamic_calcium_dataset(
     random_state: int | None,
     config: DynamicSimulationConfig,
 ) -> SyntheticDataset:
-    """Produce an episodic trace where fall phases have no cross-ROI propagation."""
+    """Produce an episodic trace with separately declared rise and fall truth."""
 
     base = np.asarray(adjacency, dtype=bool).copy()
     if base.ndim != 2 or base.shape[0] != base.shape[1]:
@@ -467,10 +547,13 @@ def _simulate_dynamic_calcium_dataset(
     phase_labels = np.zeros(n_steps, dtype=int)
     episodes: list[SyntheticEpisode] = []
     rise_adjacencies: list[np.ndarray] = []
+    fall_truth_adjacencies: list[np.ndarray] = []
     union_adjacency = np.zeros_like(base, dtype=bool)
+    fall_truth_union = np.zeros_like(base, dtype=bool)
     edge_presence_counts = np.zeros(base.shape, dtype=int)
     node_presence_counts = np.zeros(n_rois, dtype=int)
     state = np.zeros(n_rois, dtype=float)
+    fall_truth_events = np.zeros_like(events)
     cursor = 0
     min_rise_length = _minimum_rise_length(config)
     rise_waveform = _rise_waveform(config)
@@ -503,8 +586,17 @@ def _simulate_dynamic_calcium_dataset(
         fall_stop = fall_start + fall_length
         active_nodes = _episode_active_nodes(base, config, episode_index)
         graph = _episode_adjacency(base, config, episode_index, rng, active_nodes)
+        fall_graph = _episode_fall_adjacency(
+            base,
+            graph,
+            config,
+            episode_index,
+            active_nodes,
+        )
         rise_adjacencies.append(graph.copy())
+        fall_truth_adjacencies.append(fall_graph.copy())
         union_adjacency |= graph
+        fall_truth_union |= fall_graph
         edge_presence_counts += graph.astype(int)
         node_presence_counts += active_nodes.astype(int)
         episodes.append(
@@ -515,6 +607,7 @@ def _simulate_dynamic_calcium_dataset(
                 fall_stop,
                 graph,
                 active_nodes=active_nodes.copy(),
+                fall_adjacency=fall_graph.copy(),
             )
         )
         state = state.copy()
@@ -581,6 +674,56 @@ def _simulate_dynamic_calcium_dataset(
 
         for time in range(fall_start, fall_stop):
             phase_labels[time] = 2
+            truth_events = np.zeros(n_rois, dtype=bool)
+            propagated = np.zeros(n_rois, dtype=bool)
+            if fall_graph.any():
+                eligible = np.ones(n_rois, dtype=bool)
+                if config.fall_overlap_exclusion_samples > 0:
+                    recent = np.flatnonzero(
+                        np.any(
+                            fall_truth_events[
+                                :,
+                                max(fall_start, time - config.fall_overlap_exclusion_samples) : time,
+                            ]
+                            > 0,
+                            axis=1,
+                        )
+                    )
+                    eligible[recent] = False
+                if time == fall_start:
+                    sources = active_nodes & np.any(fall_graph, axis=1)
+                    initial_candidates = sources if sources.any() else active_nodes
+                    spontaneous = (
+                        rng.random(n_rois) < config.fall_initial_activation_probability
+                    ) & initial_candidates
+                    if (
+                        config.fall_initial_activation_probability > 0
+                        and initial_candidates.any()
+                        and not spontaneous.any()
+                    ):
+                        candidates = np.flatnonzero(initial_candidates)
+                        spontaneous[
+                            candidates[int(rng.integers(0, len(candidates)))]
+                        ] = True
+                else:
+                    spontaneous = (
+                        rng.random(n_rois) < config.fall_spontaneous_rate
+                    ) & active_nodes
+                spontaneous &= eligible
+                if time - config.propagation_delay >= fall_start:
+                    incoming = (
+                        fall_graph.T
+                        @ (fall_truth_events[:, time - config.propagation_delay] > 0)
+                        > 0
+                    )
+                    propagated = (
+                        incoming
+                        & (rng.random(n_rois) < config.fall_transmission_probability)
+                        & active_nodes
+                        & eligible
+                    )
+                truth_events = spontaneous | propagated
+                fall_truth_events[:, time] = truth_events.astype(float)
             local_noise = np.zeros(n_rois, dtype=float)
             noisy_nodes = (rng.random(n_rois) < config.fall_noise_rate) & active_nodes
             if noisy_nodes.any():
@@ -589,9 +732,18 @@ def _simulate_dynamic_calcium_dataset(
                     size=int(np.count_nonzero(noisy_nodes)),
                 )
             max_noise = np.maximum((1.0 - gamma_fall) * state * 0.8, 0.0)
-            innovation = np.minimum(local_noise, max_noise)
-            events[:, time] = innovation
-            state = gamma_fall * state + innovation
+            noise_innovation = np.minimum(local_noise, max_noise)
+            fall_drop = (
+                truth_events.astype(float)
+                * config.fall_propagation_drop_fraction
+                * np.maximum(state, 0.0)
+            )
+            events[:, time] = truth_events.astype(float) + noise_innovation
+            propagated_events[:, time] = propagated.astype(float)
+            state = np.maximum(
+                gamma_fall * state - fall_drop + noise_innovation,
+                0.0,
+            )
             state[~active_nodes] = 0.0
             calcium[:, time] = state
 
@@ -618,6 +770,8 @@ def _simulate_dynamic_calcium_dataset(
         edge_prevalence=edge_prevalence,
         node_presence_counts=node_presence_counts,
         node_prevalence=node_prevalence,
+        fall_truth_adjacency=fall_truth_union,
+        fall_truth_adjacencies=tuple(fall_truth_adjacencies),
     )
 
 
@@ -1048,6 +1202,7 @@ def run_leave_one_transient_stability(
 
 def _representation_truths(dataset: SyntheticDataset) -> dict[str, np.ndarray]:
     union = np.asarray(dataset.adjacency, dtype=bool).copy()
+    fall_truth = dataset.fall_union_adjacency
     truth = {
         "full": union.copy(),
         "deconvolved": union.copy(),
@@ -1056,9 +1211,10 @@ def _representation_truths(dataset: SyntheticDataset) -> dict[str, np.ndarray]:
         "fall_residual": union.copy(),
     }
     if dataset.episodes:
-        noncausal = np.zeros_like(union, dtype=bool)
-        truth["fall"] = noncausal.copy()
-        truth["fall_residual"] = noncausal.copy()
+        if fall_truth is None:
+            fall_truth = np.zeros_like(union, dtype=bool)
+        truth["fall"] = fall_truth.copy()
+        truth["fall_residual"] = fall_truth.copy()
     return truth
 
 

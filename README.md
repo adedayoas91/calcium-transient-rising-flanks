@@ -4,11 +4,18 @@
 
 This work is solely for calcium imaging data analysis.
 
-Calcium flows into the soma of neurons, activating green fluorescence protein (GFP), which then fluoresces. A key characteristic of GFP is its **very fast rise but slow fall** in fluorescence. It is essential to understand that the pumping out of calcium from the soma does not have any contribution to the causal relation between any two neurons.
+Activity-evoked calcium influx is reported indirectly by a fluorescent calcium
+indicator. These signals commonly rise faster than they decay, but the falling
+phase can reflect a mixture of indicator kinetics, calcium handling,
+physiology, and noise. It therefore cannot be assumed a priori to contain no
+causal information.
 
 ![Calcium inflow visualization showing GFP response with fast rise and slow fall characteristics](https://user-images.githubusercontent.com/47278559/209997772-998b1c87-c6ff-463b-9162-d960484d3e82.png)
 
-This project explores only the activations of neurons and finds meaningful structures in the data by analyzing the rising flanks of calcium transients—the rapid activation phase where causal relationships are most informative.
+This project tests the proposal that rising-flank increments better preserve
+directed activation timing than full or falling traces. Falling-flank and
+decay-residual analyses are retained as falsification comparators; they do not
+guarantee that a recovered rise graph is causal.
 
 ## Overview
 
@@ -37,14 +44,16 @@ This repository now provides a runnable, tested reference implementation for:
 - prespecified transient and residual diagnostics;
 - synthetic observation/sampling grids, locked calibration/evaluation splitting,
   and empirical parameter sensitivity execution;
-- a latent-confounding sensitivity adapter boundary for future LPCMCI or
-  SVAR-FCI integrations; and
+- an optional LPCMCI adapter that preserves raw PAG outputs, plus a controlled
+  common-input benchmark; SVAR-FCI remains future work; and
 - bilateral structure plots, anatomical topographic overlays for notebook
   results, and compatibility wrappers for the starter module names.
 
-The supplied notebook suite is not currently reproducible as-is: although
-`data/` contains the supplied Fish 3 trace, centroid, and background arrays,
-the notebooks import external modules that are not in this repository.
+The legacy notebook suite is not uniformly standalone: although `data/`
+contains the supplied Fish 3 trace, centroid, and background arrays, some
+notebooks import external modules that are not in this repository. The tested
+scripts under `examples/` are the reproducible reference workflows; they do
+not make the legacy notebooks self-contained.
 `src/core/causalised-GC.py` is the active estimator source for c-GC and c-GC*.
 `CausalisedGC` shapes that supplied implementation for the metric pipeline and
 adds modified event-aware fitting paths: compressed mode follows the old
@@ -63,7 +72,7 @@ lags while blocking cross-segment discontinuities.
 | `validation.py` | Synthetic data, null controls, representation validation, and stability resampling |
 | `robustness.py` | Sampling/observation grids, locked splits, and empirical parameter sensitivity |
 | `pipeline.py` | Full paired analysis across preprocessing scenarios |
-| `sensitivity.py` | Adapter protocol for PAG-producing latent-confounding analyses |
+| `sensitivity.py` / `baselines.py` | PAG protocol plus optional LPCMCI and OASIS adapters; raw PAG semantics are preserved |
 | `plotting.py` | Non-mutating bilateral and anatomical-topographic plots |
 
 ## Scientific Conventions
@@ -102,6 +111,34 @@ Run a synthetic end-to-end analysis:
 PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
   .venv/bin/python examples/synthetic_pipeline.py
 ```
+
+Run the smallest deterministic example with known directed truth and save its
+fully declared configuration and recovery metrics:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/minimal_reproducible_analysis.py \
+  --output outputs/minimal_reproducible_analysis.json
+```
+
+Build the bounded reviewer-sensitivity package. This reuses the saved locked
+dynamic rows to compute seed-level bootstrap confidence intervals and generator
+summaries, then runs a small locked static-synthetic threshold/smoothing grid:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/build_reviewer_sensitivity_package.py
+```
+
+The package writes `outputs/reviewer_sensitivity/dynamic_seed_summary.csv`,
+`dynamic_paired_contrasts.csv`, `dynamic_generator_seed_rows.csv`,
+`dynamic_generator_summary.csv`, `threshold_smoothing_seed_rows.csv`,
+`threshold_smoothing_summary.csv`, `threshold_smoothing_sensitivity.png`, and
+`summary.json`. The intervals quantify between-seed Monte Carlo variation only.
+The threshold grid and plotted curves are bounded four-node proposal stress
+tests with 199 surrogates, not a comprehensive simulation or empirical
+benchmark. Use `--skip-threshold-grid` to rebuild only the summaries from saved
+locked rows.
 
 Generate dynamic-A episodic validation tables where rise phases are driven by
 episode-specific adjacency matrices and fall phases have no cross-ROI
@@ -212,6 +249,36 @@ This writes `outputs/empirical_null_controls/null_control_rows.csv`,
 observed-minus-null means and empirical upper-tail null p-values for
 `W_IC`, `W_RC`, edge density, retained edges, and total retained weight.
 Use `--method cgc` for a single-method run.
+
+The saved outputs do not contain per-edge p-value matrices, so a BH-FDR versus
+unadjusted empirical comparison currently requires re-estimation. The following
+commands declare the review comparison without running it implicitly. With
+cases C/D, three recordings, two representations, two methods, and the
+mandatory observed/reverse-time/cross-recording fits, they request 72
+1000-surrogate graph fits per arm (144 total):
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/run_empirical_null_controls.py \
+  --cases C,D --recordings F3T1,F3T2,F5T2 \
+  --representations rise,fall --methods cgc,cgc-star \
+  --n-null-replicates 0 --n-estimator-surrogates 1000 --alpha 0.05 \
+  --event-mode physical --seed 10 --resume \
+  --output-dir outputs/empirical_fdr_comparison/bh
+
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/run_empirical_null_controls.py \
+  --cases C,D --recordings F3T1,F3T2,F5T2 \
+  --representations rise,fall --methods cgc,cgc-star \
+  --n-null-replicates 0 --n-estimator-surrogates 1000 --alpha 0.05 \
+  --event-mode physical --seed 10 --no-fdr --resume \
+  --output-dir outputs/empirical_fdr_comparison/unadjusted
+```
+
+These are deliberately documented as heavy follow-up commands, not presented
+as completed evidence. The complete preview-first campaign, optional dependency
+setup, resume contract, and completion markers are documented in
+`notebooks/exec_order.md`.
 
 Summarize graph support, rise/fall overlap, and saved-artifact stability:
 

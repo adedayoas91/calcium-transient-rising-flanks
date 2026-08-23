@@ -1,5 +1,18 @@
 """Event-aware directed-structure analysis for calcium transients."""
 
+from .calibration import (
+    ThresholdCalibrationResult,
+    calibrate_roi_thresholds,
+    calibration_signal,
+)
+from .baselines import (
+    LPCMCIAdapter,
+    LPCMCIResult,
+    OASISDeconvolver,
+    OASISResult,
+    project_lossy_lagged_pag_skeleton,
+)
+
 from .diagnostics import (
     ResidualDiagnostics,
     TransientSummary,
@@ -29,6 +42,12 @@ from .estimators import (
     weighted_benjamini_hochberg,
 )
 from .metrics import delta_w_ic, edge_recovery, graph_stability, w_ic, w_rc
+from .onset_detection import (
+    BayesianOnsetResult,
+    ChangePointOnsetResult,
+    detect_bayesian_onsets,
+    detect_change_point_onsets,
+)
 from .pipeline import AnalysisConfig, PipelineResult, run_pipeline
 from .plotting import (
     plot_directed_graph,
@@ -77,10 +96,16 @@ from .validation import (
 
 __all__ = [
     "AnalysisConfig",
+    "BayesianOnsetResult",
     "CausalisedGC",
+    "ChangePointOnsetResult",
     "DynamicSimulationConfig",
     "EventNullControlResult",
     "GraphResult",
+    "LPCMCIAdapter",
+    "LPCMCIResult",
+    "OASISDeconvolver",
+    "OASISResult",
     "PartialAncestralGraph",
     "PipelineResult",
     "ResidualDiagnostics",
@@ -97,15 +122,20 @@ __all__ = [
     "SyntheticGridRun",
     "TemporalPriorResult",
     "TemporalPriorStateMasks",
+    "ThresholdCalibrationResult",
     "TransientSummary",
     "add_paired_deltas",
     "build_representations",
     "build_scenarios",
     "build_temporal_prior",
+    "calibrate_roi_thresholds",
+    "calibration_signal",
     "bootstrap_event_indices",
     "characterize_transients",
     "cross_recording_surrogate",
     "delta_w_ic",
+    "detect_bayesian_onsets",
+    "detect_change_point_onsets",
     "downsample_dataset",
     "edge_recovery",
     "extract_rise_flank_runs",
@@ -120,6 +150,7 @@ __all__ = [
     "plot_matrix",
     "plot_topographic_graph",
     "plot_topographic_pair",
+    "project_lossy_lagged_pag_skeleton",
     "residual_diagnostics",
     "reverse_event_indices",
     "rising_flank",
