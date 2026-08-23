@@ -62,6 +62,20 @@ def _load_tigramite_classes() -> tuple[type[Any], type[Any], type[Any]]:
             "tigramite.independence_tests.parcorr"
         )
     except ImportError as exc:
+        missing_package = getattr(exc, "name", None)
+        missing_tigramite = missing_package == "tigramite" or (
+            missing_package is not None
+            and missing_package.startswith("tigramite.")
+        )
+        if missing_package and not missing_tigramite:
+            error = ImportError(
+                "LPCMCI PAG discovery could not import Tigramite because its "
+                f"runtime dependency '{missing_package}' is unavailable. "
+                "Reinstall 'calcium-transient-rising-flank[pag]' so all PAG "
+                "dependencies are present."
+            )
+            error.__cause__ = exc
+            raise error from exc
         raise _optional_dependency_error(
             extra="pag",
             package="tigramite>=5.2.10.1",

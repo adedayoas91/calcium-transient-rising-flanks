@@ -124,6 +124,19 @@ class BaselineAdapterTests(unittest.TestCase):
             with self.assertRaisesRegex(ImportError, "pag"):
                 LPCMCIAdapter(tau_max=1).fit(np.ones((2, 4)))
 
+    def test_lpcmci_adapter_reports_missing_tigramite_runtime_dependency(
+        self,
+    ) -> None:
+        missing_joblib = ModuleNotFoundError(
+            "No module named 'joblib'", name="joblib"
+        )
+        with patch(
+            "calcium_transient_rising_flank.baselines.importlib.import_module",
+            side_effect=missing_joblib,
+        ):
+            with self.assertRaisesRegex(ImportError, "dependency 'joblib'"):
+                LPCMCIAdapter(tau_max=1).fit(np.ones((2, 4)))
+
     def test_lpcmci_adapter_rejects_duplicate_tau_max(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not override tau_max"):
             LPCMCIAdapter(tau_max=1, run_kwargs={"tau_max": 2}).fit(
