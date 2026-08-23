@@ -1,6 +1,6 @@
 # Notebook Execution Order
 
-Run notebooks from the `calcium-transient-rising-flank` package root so relative paths resolve cleanly. The newer wrapper notebooks default to dry-run mode; set their `RUN_*` toggles to `True` when you want them to launch the underlying scripts.
+Run notebooks from the `calcium-transient-rising-flank` package root so relative paths resolve cleanly. The four lowercase LPCMCI/OASIS notebooks are ready to execute results by default (`RUN_LPCMCI = True` or `RUN_OASIS = True`). Other preview-oriented wrappers retain their documented disabled launch toggles.
 
 ## Reviewer-Revision Campaign (Recommended Next Run)
 
@@ -13,11 +13,15 @@ surrogates are excluded from this campaign by author decision.
 
 The core package remains lightweight. LPCMCI and OASIS are isolated in optional
 extras because they are external GPL-3.0 packages and LPCMCI is an experimental
-Tigramite method.
+Tigramite method. Their notebooks and output roots are separate so the two
+baselines can run in parallel.
 
 ```bash
 uv sync --extra pag --extra deconvolution
 ```
+
+For separate environments, use `uv sync --extra pag` for LPCMCI or
+`uv sync --extra deconvolution` for OASIS.
 
 The committed `uv.lock` contains the resolved baseline dependencies. Use the
 same environment for every stage so OASIS and LPCMCI versions remain matched.
@@ -28,19 +32,19 @@ Preview the exact commands first:
 
 ```bash
 uv run --extra pag --extra deconvolution python \
-  examples/run_reviewer_revision_campaign.py --resume --dry-run
+  examples/run_revision_campaign.py --resume --dry-run
 ```
 
 Then launch the full resumable campaign:
 
 ```bash
 uv run --extra pag --extra deconvolution python \
-  examples/run_reviewer_revision_campaign.py --resume
+  examples/run_revision_campaign.py --resume
 ```
 
 The corresponding preview-first notebook is:
 
-1. `notebooks/simulations/08_reviewer_revision_campaign_run.ipynb`
+1. `notebooks/simulations/08_revision_campaign_run.ipynb`
 
 Set `RUN_CAMPAIGN = True` only after inspecting the preview. The notebook passes
 `--resume`, and the campaign passes `--resume` to every potentially long child
@@ -48,18 +52,19 @@ runner. Re-executing the cell skips a stage only when its `summary.json`
 contains `"status": "complete"`; partial stages continue from their checkpoints.
 
 The campaign writes its top-level state to
-`outputs/reviewer_revision_campaign/campaign_state.json` and executes these
+`outputs/revision_campaign/campaign_state.json` and executes these
 stages in the reviewer-recommended dependency order:
 
 | Stage | Implementation | Primary completion marker |
 |---|---|---|
-| 1 | Matched BH empirical re-estimation plus edge-level graph artifacts | `outputs/reviewer_revision_campaign/empirical_fdr/bh/summary.json` |
-| 2 | Matched unadjusted empirical re-estimation plus edge-level graph artifacts | `outputs/reviewer_revision_campaign/empirical_fdr/unadjusted/summary.json` |
-| 3 | Held-out MAD/AR-residual per-ROI thresholds plus score sweeps for recovery, `W_IC`, and `W_RC` | `outputs/reviewer_revision_campaign/threshold_calibration/summary.json` |
-| 4 | Mixed noncausal/causal-fall benchmark, overlap-allowed condition, and kinetic-misspecification condition | `outputs/reviewer_revision_campaign/mixed_fall/summary.json` |
-| 5 | OASIS event/preprocessing baseline and raw LPCMCI PAG baseline under controlled common input | `outputs/reviewer_revision_campaign/lpcmci_oasis/summary.json` |
-| 6 | Multi-lag, run-context, and bout-bounded physical-event hybrid grids | `outputs/reviewer_revision_campaign/hybrid_event/summary.json` |
-| 7 | Thresholded-increment, change-point, and kinetics-template onset comparison | `outputs/reviewer_revision_campaign/adaptive_onset/summary.json` |
+| 1 | Matched BH empirical re-estimation plus edge-level graph artifacts | `outputs/revision_campaign/empirical_fdr/bh/summary.json` |
+| 2 | Matched unadjusted empirical re-estimation plus edge-level graph artifacts | `outputs/revision_campaign/empirical_fdr/unadjusted/summary.json` |
+| 3 | Held-out MAD/AR-residual per-ROI thresholds plus score sweeps for recovery, `W_IC`, and `W_RC` | `outputs/revision_campaign/threshold_calibration/summary.json` |
+| 4 | Mixed noncausal/causal-fall benchmark, overlap-allowed condition, and kinetic-misspecification condition | `outputs/revision_campaign/mixed_fall/summary.json` |
+| 5a | Raw LPCMCI PAG baseline on the exact static c-GC/c-GC* grid | `outputs/revision_campaign/lpcmci_simulation/summary.json` |
+| 5b | OASIS event/preprocessing baseline on the exact static c-GC/c-GC* grid | `outputs/revision_campaign/oasis_simulation/summary.json` |
+| 6 | Multi-lag, run-context, and bout-bounded physical-event hybrid grids | `outputs/revision_campaign/hybrid_event/summary.json` |
+| 7 | Thresholded-increment, change-point, and kinetics-template onset comparison | `outputs/revision_campaign/adaptive_onset/summary.json` |
 
 The two empirical arms use the same cases, recordings, representations,
 estimators, seeds, alpha level, and 1,000 estimator surrogates. The only arm
@@ -72,15 +77,29 @@ ROI pairs within each recording/case/method/representation.
 
 Use these when a scheduler or failure requires running one family at a time:
 
-1. `notebooks/motorneurons/Reviewer_FDR_reestimation.ipynb`
-2. `notebooks/simulations/05_reviewer_calibration_onset_run.ipynb`
-3. `notebooks/simulations/06_reviewer_dynamic_extensions_run.ipynb`
-4. `notebooks/simulations/07_reviewer_baseline_benchmarks_run.ipynb`
+1. `notebooks/motorneurons/fdr_reestimation.ipynb`
+2. `notebooks/simulations/05_calibration_onset_run.ipynb`
+3. `notebooks/simulations/06_dynamic_extensions_run.ipynb`
+4. `notebooks/simulations/lpcmci.ipynb`
+5. `notebooks/simulations/oasis.ipynb`
+6. `notebooks/motorneurons/lpcmci.ipynb`
+7. `notebooks/motorneurons/oasis.ipynb`
 
 Every heavy launch command in these notebooks contains `--resume`; there is no
 notebook toggle that disables checkpoint reuse. The mixed-fall and hybrid grids
 write to separate directories, as do threshold calibration and adaptive onset,
 so later stages cannot overwrite earlier evidence.
+
+The lowercase baseline notebooks start their result runs when their launch cell
+is executed; they do not default to preview or dry-run mode. Simulation baseline
+units reproduce the static c-GC/c-GC* grid exactly: 10 outer networks, 20 seeded
+recordings per condition, 3,000 frames, and the native/noisy/slow-decay/
+low-framerate/shared-input conditions. Motorneuron baseline units read the same
+deduplicated `dff` and `f_smooth` records from
+`df_motorneurons_F3T1_F3T2_F5T2.pkl` as both c-GC notebooks. Each baseline output
+root contains `input_manifest.csv`; matching unit keys must have identical
+`input_digest` values before results are compared. The c-GC/c-GC* static input
+manifests and motorneuron summary rows expose the same digests.
 
 The matched empirical runner also writes
 `observed_graph_artifacts_manifest.json` and compressed `.npz` files under each
@@ -99,7 +118,7 @@ uv run python examples/run_empirical_null_controls.py \
   --representations rise,fall --methods cgc,cgc-star \
   --n-null-replicates 0 --n-estimator-surrogates 1000 \
   --alpha 0.05 --event-mode physical --seed 10 --resume \
-  --output-dir outputs/reviewer_revision_campaign/empirical_fdr/bh
+  --output-dir outputs/revision_campaign/empirical_fdr/bh
 
 # Matched unadjusted arm
 uv run python examples/run_empirical_null_controls.py \
@@ -107,35 +126,59 @@ uv run python examples/run_empirical_null_controls.py \
   --representations rise,fall --methods cgc,cgc-star \
   --n-null-replicates 0 --n-estimator-surrogates 1000 \
   --alpha 0.05 --event-mode physical --seed 10 --no-fdr --resume \
-  --output-dir outputs/reviewer_revision_campaign/empirical_fdr/unadjusted
+  --output-dir outputs/revision_campaign/empirical_fdr/unadjusted
 
 # Held-out per-ROI threshold and W_IC/W_RC calibration
-uv run python examples/reviewer_calibration_onset.py \
+uv run python examples/calibration_onset.py \
   --components threshold --n-estimator-surrogates 1000 --resume \
-  --output-dir outputs/reviewer_revision_campaign/threshold_calibration
+  --output-dir outputs/revision_campaign/threshold_calibration
 
 # Mixed fall benchmark
-uv run python examples/reviewer_dynamic_extensions.py \
+uv run python examples/dynamic_extensions.py \
   --methods cgc,cgc-star --grid lag1_context1 --n-seeds 8 \
   --n-surrogates 1000 --resume \
-  --output-dir outputs/reviewer_revision_campaign/mixed_fall
+  --output-dir outputs/revision_campaign/mixed_fall
 
-# OASIS and LPCMCI baselines
-uv run --extra pag --extra deconvolution python \
-  examples/reviewer_baseline_benchmarks.py --n-cgc-surrogates 1000 --resume \
-  --output-dir outputs/reviewer_revision_campaign/lpcmci_oasis
+# LPCMCI simulation baseline
+uv run --extra pag python examples/simulation_baselines.py \
+  --components lpcmci \
+  --representations full,deconvolved,rise,fall,fall_residual \
+  --n-runs-outer 10 --n-seeds 20 --n-steps 3000 --resume \
+  --output-dir outputs/revision_campaign/lpcmci_simulation
+
+# OASIS simulation baseline
+uv run --extra deconvolution python examples/simulation_baselines.py \
+  --components oasis --representations full,deconvolved,oasis,rise,fall \
+  --cgc-methods cgc,cgc-star --n-runs-outer 10 --n-seeds 20 --n-steps 3000 \
+  --n-cgc-surrogates 1000 --resume \
+  --output-dir outputs/revision_campaign/oasis_simulation
+
+# LPCMCI motorneuron baseline
+uv run --extra pag python examples/empirical_baselines.py \
+  --components lpcmci --fluo-types dff,f_smooth \
+  --recordings F3T1,F3T2,F5T2 \
+  --representations full,deconvolved,rise,fall,fall_residual --resume \
+  --output-dir outputs/revision_campaign/motorneurons_lpcmci
+
+# OASIS motorneuron preprocessing plus c-GC/c-GC* baselines
+uv run --extra deconvolution python examples/empirical_baselines.py \
+  --components oasis --fluo-types dff,f_smooth \
+  --recordings F3T1,F3T2,F5T2 \
+  --oasis-outputs spikes,denoised --cgc-methods cgc,cgc-star \
+  --n-cgc-surrogates 1000 --resume \
+  --output-dir outputs/revision_campaign/motorneurons_oasis
 
 # Hybrid physical-event grids
-uv run python examples/reviewer_dynamic_extensions.py \
+uv run python examples/dynamic_extensions.py \
   --methods cgc,cgc-star \
   --grid lag2_context2,bout_bounded_lag3_context4 --n-seeds 8 \
   --n-surrogates 1000 --resume \
-  --output-dir outputs/reviewer_revision_campaign/hybrid_event
+  --output-dir outputs/revision_campaign/hybrid_event
 
 # Adaptive-onset comparison
-uv run python examples/reviewer_calibration_onset.py \
+uv run python examples/calibration_onset.py \
   --components onset --resume \
-  --output-dir outputs/reviewer_revision_campaign/adaptive_onset
+  --output-dir outputs/revision_campaign/adaptive_onset
 ```
 
 ### 4. Resume and failure rules
@@ -144,13 +187,18 @@ uv run python examples/reviewer_calibration_onset.py \
   saved configuration before accepting partial rows.
 - Do not change seeds, methods, grids, thresholds, or output directories while
   resuming. A configuration mismatch exits instead of mixing incompatible rows.
+- Before comparing separate LPCMCI and OASIS runs, join their
+  `input_manifest.csv` files on the full unit key and require exact equality of
+  `input_digest`. The same digests identify the inputs used by c-GC/c-GC*.
 - Do not delete partial CSV or progress JSON files independently. A progress
   counter is advisory: the runners reconstruct completion from the full
   expected row keys. Incomplete or duplicated units are discarded and rerun;
   fully written units are recovered even if interruption occurred before the
   progress JSON update.
-- Raw LPCMCI `graph`, `p_matrix`, and `val_matrix` tensors are retained under
-  `outputs/reviewer_revision_campaign/lpcmci_oasis/raw_pag/`. The binary lagged
+- Raw simulation LPCMCI `graph`, `p_matrix`, and `val_matrix` tensors are retained
+  under `outputs/revision_campaign/lpcmci_simulation/raw_pag/`; empirical
+  tensors are under `outputs/revision_campaign/motorneurons_lpcmci/raw_pag/`.
+  The binary lagged
   projection is lossy, is scored only as an undirected skeleton, and must not
   replace the PAG in reporting.
 - OASIS rows are event-recovery and preprocessing-ablation evidence; OASIS is
@@ -165,7 +213,7 @@ first launch, keep the configuration and output root fixed and rerun the same
 cell after any interruption; the checkpoint contract will then recover only
 complete compatible units.
 
-All 19 notebooks under `notebooks/simulations/` and
+All 22 notebooks under `notebooks/simulations/` and
 `notebooks/motorneurons/` now declare their resume strategy in notebook
 metadata and in an execution-contract cell:
 
@@ -218,14 +266,23 @@ Use `TAU`, `N_PASTS`, `MIN_RISE_RUN_SAMPLES`, and the `RISE_MATCH_*` settings in
 
 2. `notebooks/simulations/c-GC.ipynb`
 3. `notebooks/simulations/c-GC-star.ipynb`
+4. `notebooks/simulations/lpcmci.ipynb`
+5. `notebooks/simulations/oasis.ipynb`
 
 Run these when you need to regenerate the static synthetic validation outputs under `outputs/validation_results/`. They are existing notebooks and are separate from the dynamic-A scenario.
 
 Set `TAU = None` to preserve the existing merged-`N_LAGS` behavior, or set `TAU` to a positive integer to keep only that causal lag after fitting. `N_PASTS` controls the conditioning-history depth and must be at least `TAU`.
 
+The LPCMCI and OASIS notebooks use separate resumable output roots and can run
+in parallel. LPCMCI preserves raw PAG tensors and reports its lagged skeleton
+only as a lossy support projection. OASIS reports event recovery and downstream
+c-GC/c-GC* recovery; it is not labeled as a causal learner. Both regenerate the
+same static grid consumed by `c-GC.ipynb` and `c-GC-star.ipynb`, and both emit
+per-unit input digests for an exact equality check.
+
 ## 2. Dynamic-A Synthetic Validation
 
-4. `notebooks/simulations/01_dynamic_episodic_validation_run.ipynb`
+6. `notebooks/simulations/01_dynamic_episodic_validation_run.ipynb`
 
 This wraps `examples/dynamic_episodic_validation.py` and writes the locked dynamic-A outputs:
 
@@ -240,18 +297,27 @@ Set `TAU` and `N_PASTS` in the parameter cell before running. When `TAU` is set,
 
 ## 3. Empirical Graph Artifacts
 
-5. `notebooks/motorneurons/Rising_flanks_WithSections.ipynb`
-6. `notebooks/motorneurons/Rising_flanks_Hindbrain.ipynb`
-7. `notebooks/motorneurons/c-GC_Motoneurons.ipynb`
-8. `notebooks/motorneurons/c-GC-star_Motoneurons.ipynb`
-9. `notebooks/motorneurons/c-GC_Hindbrain.ipynb`
-10. `notebooks/motorneurons/c-GC-star_Hindbrain.ipynb`
+7. `notebooks/motorneurons/Rising_flanks_WithSections.ipynb`
+8. `notebooks/motorneurons/Rising_flanks_Hindbrain.ipynb`
+9. `notebooks/motorneurons/c-GC_Motoneurons.ipynb`
+10. `notebooks/motorneurons/c-GC-star_Motoneurons.ipynb`
+11. `notebooks/motorneurons/c-GC_Hindbrain.ipynb`
+12. `notebooks/motorneurons/c-GC-star_Hindbrain.ipynb`
+13. `notebooks/motorneurons/lpcmci.ipynb`
+14. `notebooks/motorneurons/oasis.ipynb`
 
 Run these only when the saved graph pickle artifacts under `outputs/motorneurons/` need to be rebuilt.
 
+The lowercase baseline notebooks are independent wrappers. LPCMCI checkpoints
+each fluorescence-type--recording--representation PAG fit. OASIS checkpoints trace
+deconvolution separately from each downstream c-GC/c-GC* fit. Both retain raw
+method outputs, read the same combined dataframe records as the c-GC/c-GC*
+notebooks, and treat motorneuron graph summaries as descriptive because directed
+ground truth is unavailable.
+
 ## 4. Saved-Artifact Summaries
 
-11. `notebooks/simulations/02_saved_artifact_analysis_run.ipynb`
+15. `notebooks/simulations/02_saved_artifact_analysis_run.ipynb`
 
 This wraps the scripts that summarize already-generated artifacts:
 
@@ -265,7 +331,7 @@ This wraps the scripts that summarize already-generated artifacts:
 
 ## 5. Publication-Gate Runs
 
-12. `notebooks/simulations/03_publication_gate_pipeline_run.ipynb`
+16. `notebooks/simulations/03_publication_gate_pipeline_run.ipynb`
 
 This wraps `examples/run_publication_gate_pipeline.py` for the heavier user-run gates:
 
@@ -289,8 +355,8 @@ Set `DYNAMIC_TAU`, `DYNAMIC_N_PASTS`, `MIN_RISE_RUN_SAMPLES`, and the `RISE_MATC
 
 ## 6. Three-State Temporal-Prior Follow-Up
 
-13. `notebooks/simulations/04_temporal_resolvability_map.ipynb`
-14. `notebooks/motorneurons/Temporal_resolvability_screen.ipynb`
+17. `notebooks/simulations/04_temporal_resolvability_map.ipynb`
+18. `notebooks/motorneurons/Temporal_resolvability_screen.ipynb`
 
 Run the synthetic notebook first. It is the user-run entry point for the locked
 three-state temporal-resolvability experiment and keeps manual results separate

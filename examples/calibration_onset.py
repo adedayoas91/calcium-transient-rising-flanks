@@ -1,4 +1,4 @@
-"""Run held-out threshold and adaptive-onset reviewer experiments.
+"""Run held-out threshold and adaptive-onset experiments.
 
 The experiment is deliberately network-blind during calibration: thresholds
 are estimated from a held-out prefix of each simulated trace and are never
@@ -31,7 +31,7 @@ from calcium_transient_rising_flank import (
 from calcium_transient_rising_flank.validation import simulate_calcium_dataset
 
 
-DEFAULT_OUTPUT_DIR = Path("outputs/reviewer_calibration_onset")
+DEFAULT_OUTPUT_DIR = Path("outputs/calibration_onset")
 CALIBRATION_METHODS = ("first_difference_mad", "ar_residual_mad")
 FIXED_THRESHOLDS = (0.0, 0.02, 0.05)
 MULTIPLIERS = (2.0, 3.0, 4.0)

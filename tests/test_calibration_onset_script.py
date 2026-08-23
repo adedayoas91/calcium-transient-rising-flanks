@@ -1,3 +1,5 @@
+"""Tests for the calibration/onset runner."""
+
 import importlib.util
 import unittest
 from pathlib import Path
@@ -5,21 +7,19 @@ from pathlib import Path
 import numpy as np
 
 
-SCRIPT = (
-    Path(__file__).parents[1] / "examples" / "reviewer_calibration_onset.py"
-)
+SCRIPT = Path(__file__).parents[1] / "examples" / "calibration_onset.py"
 
 
 def _load_script_module():
-    spec = importlib.util.spec_from_file_location("reviewer_calibration_onset", SCRIPT)
+    spec = importlib.util.spec_from_file_location("calibration_onset", SCRIPT)
     if spec is None or spec.loader is None:
-        raise RuntimeError("could not load reviewer calibration/onset script")
+        raise RuntimeError("could not load calibration/onset script")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-class ReviewerCalibrationOnsetScriptTests(unittest.TestCase):
+class CalibrationOnsetScriptTests(unittest.TestCase):
     def test_first_crossings_returns_minus_one_for_null_rows(self) -> None:
         script = _load_script_module()
         signal = np.array([[0.0, 0.1, 0.4], [0.0, 0.1, 0.2]])

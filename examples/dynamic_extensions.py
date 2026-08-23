@@ -1,4 +1,4 @@
-"""Run reviewer-requested dynamic fall extensions on physical event frames."""
+"""Run dynamic fall extensions on physical event frames."""
 
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ SUMMARY_METRICS = (
     "fall_propagated_total",
 )
 METHOD_CHOICES = ("cgc", "fcgc", "cgc-star", "cgc*")
-GRID_ROWS_CSV = "reviewer_dynamic_extensions_rows.csv"
-REPRESENTATION_SUMMARY_CSV = "reviewer_dynamic_extensions_summary.csv"
-RISE_FALL_CONTRASTS_CSV = "reviewer_dynamic_extensions_contrasts.csv"
+GRID_ROWS_CSV = "dynamic_extensions_rows.csv"
+REPRESENTATION_SUMMARY_CSV = "dynamic_extensions_summary.csv"
+RISE_FALL_CONTRASTS_CSV = "dynamic_extensions_contrasts.csv"
 SUMMARY_JSON = "summary.json"
 RESUME_STATE_JSON = "resume_state.json"
 REPRESENTATION_ORDER = ("full", "deconvolved", "rise", "fall", "fall_residual")
@@ -586,8 +586,7 @@ def _validate_resume_signature(output_dir: Path, current_signature: dict) -> Non
             for key in mismatches
         )
         raise ValueError(
-            "cannot resume reviewer dynamic extensions with different settings: "
-            + details
+            "cannot resume dynamic extensions with different settings: " + details
         )
 
 
@@ -628,7 +627,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("outputs/validation_results/reviewer_dynamic_extensions"),
+        default=Path("outputs/validation_results/dynamic_extensions"),
     )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--n-seeds", type=int, default=4)

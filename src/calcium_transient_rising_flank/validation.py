@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from math import ceil
 
@@ -270,6 +271,167 @@ def calcium_observation_model(
     shared = rng.normal(scale=shared_noise_std, size=(1, spikes.shape[1]))
     noise = rng.normal(scale=noise_std, size=spikes.shape)
     return calcium, calcium + shared + noise
+
+
+def static_calcium_kernel(
+    rise_tau: float,
+    decay_tau: float,
+    length: int | None = None,
+) -> np.ndarray:
+    """Return the normalized double-exponential kernel used by static validation.
+
+    This is the shared observation model for the c-GC, c-GC*, LPCMCI, and
+    OASIS static benchmarks. Keeping it here prevents method-specific notebooks
+    from silently generating different comparison data.
+    """
+
+    if rise_tau <= 0 or decay_tau <= 0:
+        raise ValueError("rise_tau and decay_tau must be positive")
+    if length is None:
+        length = int(np.ceil(decay_tau * 6)) + 1
+    if length < 1:
+        raise ValueError("length must be positive")
+    time = np.arange(length, dtype=float)
+    kernel = (1.0 - np.exp(-time / rise_tau)) * np.exp(-time / decay_tau)
+    kernel[kernel < 0] = 0.0
+    peak = float(kernel.max())
+    return kernel / peak if peak > 0 else kernel
+
+
+def static_gamma_from_tau(decay_tau: float) -> float:
+    """Return the per-frame AR(1) decay used by the static notebooks."""
+
+    if decay_tau <= 0:
+        raise ValueError("decay_tau must be positive")
+    return float(np.exp(-1.0 / decay_tau))
+
+
+def array_input_digest(*arrays: np.ndarray) -> str:
+    """Fingerprint one or more arrays with dtype and shape boundaries."""
+
+    digest = hashlib.sha256()
+    for array in arrays:
+        values = np.ascontiguousarray(np.asarray(array))
+        digest.update(str(values.dtype).encode())
+        digest.update(repr(values.shape).encode())
+        digest.update(values.view(np.uint8))
+    return digest.hexdigest()
+
+
+def static_input_digest(truth: np.ndarray, traces: np.ndarray) -> str:
+    """Fingerprint a static truth graph and fluorescence matrix."""
+
+    return array_input_digest(truth, traces)
+
+
+def generate_static_validation_network(
+    n_rois: int,
+    *,
+    seed: int,
+    ipsilateral_fraction: float = 0.65,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Generate the ipsilaterally biased network used by static validation."""
+
+    if n_rois < 2:
+        raise ValueError("n_rois must be at least two")
+    if not 0.0 <= ipsilateral_fraction <= 1.0:
+        raise ValueError("ipsilateral_fraction must lie in [0, 1]")
+    rng = np.random.default_rng(seed)
+    middle = n_rois // 2
+    left = np.arange(0, middle)
+    right = np.arange(middle, n_rois)
+    adjacency = np.zeros((n_rois, n_rois), dtype=bool)
+
+    target_edges = max(n_rois - 2, int(n_rois * 0.2))
+    edges_added = 0
+    attempts = 0
+    while edges_added < target_edges and attempts < target_edges * 50:
+        attempts += 1
+        if rng.random() < ipsilateral_fraction:
+            side = left if (rng.random() < 0.5 and left.size >= 2) else right
+            if side.size < 2:
+                side = left if side is right else right
+            if side.size < 2:
+                continue
+            source, target = rng.choice(side, 2, replace=False)
+        else:
+            if left.size == 0 or right.size == 0:
+                continue
+            source = int(rng.choice(left))
+            target = int(rng.choice(right))
+            if rng.random() < 0.5:
+                source, target = target, source
+        if source != target and not adjacency[source, target]:
+            adjacency[source, target] = True
+            edges_added += 1
+
+    sides = np.concatenate(
+        [np.zeros(middle, dtype=int), np.ones(n_rois - middle, dtype=int)]
+    )
+    positions = np.concatenate(
+        [np.arange(middle, dtype=int), np.arange(n_rois - middle, dtype=int)]
+    )
+    return adjacency, sides, positions, middle
+
+
+def _static_moving_average(traces: np.ndarray, window: int) -> np.ndarray:
+    if window <= 1:
+        return traces
+    weights = np.ones(int(window), dtype=float) / float(window)
+    return np.vstack([np.convolve(row, weights, mode="same") for row in traces])
+
+
+def simulate_static_calcium_like(
+    adjacency: np.ndarray,
+    n_steps: int,
+    *,
+    rise_tau: float = 5.0,
+    decay_tau: float = 14.0,
+    noise_std: float = 0.03,
+    shared_noise_std: float = 0.0,
+    spontaneous_rate: float = 0.012,
+    transmission_probability: float = 0.85,
+    amplitude_jitter: float = 0.3,
+    smooth_window: int = 5,
+    propagation_delay: int = 1,
+    random_state: int | None = None,
+) -> SyntheticDataset:
+    """Generate the exact calcium-like observations used by static notebooks."""
+
+    if amplitude_jitter < 0:
+        raise ValueError("amplitude_jitter cannot be negative")
+    if smooth_window < 1:
+        raise ValueError("smooth_window must be positive")
+    events = simulate_events(
+        adjacency,
+        n_steps,
+        spontaneous_rate,
+        transmission_probability,
+        random_state,
+        propagation_delay,
+    )
+    rng = np.random.default_rng(random_state)
+    kernel = static_calcium_kernel(rise_tau, decay_tau)
+    calcium = np.zeros((events.shape[0], n_steps), dtype=float)
+    for roi in range(events.shape[0]):
+        amplitude = np.clip(
+            1.0 + amplitude_jitter * rng.standard_normal(n_steps),
+            0.2,
+            None,
+        )
+        calcium[roi] = np.convolve(events[roi] * amplitude, kernel)[:n_steps]
+    shared = rng.normal(scale=shared_noise_std, size=(1, n_steps))
+    noise = rng.normal(scale=noise_std, size=calcium.shape)
+    fluorescence = _static_moving_average(
+        calcium + shared + noise,
+        smooth_window,
+    )
+    return SyntheticDataset(
+        adjacency=np.asarray(adjacency, dtype=bool),
+        events=events,
+        calcium=calcium,
+        fluorescence=fluorescence,
+    )
 
 
 def _decay_values(gamma: float | np.ndarray, n_rois: int, name: str) -> np.ndarray:

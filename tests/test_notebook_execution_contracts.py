@@ -20,19 +20,28 @@ RUNNER_NOTEBOOKS = {
         "examples/temporal_resolvability_map.py",
         "examples/analyze_temporal_resolvability_map.py",
     },
-    "05_reviewer_calibration_onset_run.ipynb": {
-        "examples/reviewer_calibration_onset.py",
+    "05_calibration_onset_run.ipynb": {
+        "examples/calibration_onset.py",
     },
-    "06_reviewer_dynamic_extensions_run.ipynb": {
-        "examples/reviewer_dynamic_extensions.py",
+    "06_dynamic_extensions_run.ipynb": {
+        "examples/dynamic_extensions.py",
     },
-    "07_reviewer_baseline_benchmarks_run.ipynb": {
-        "examples/reviewer_baseline_benchmarks.py",
+    "simulations/lpcmci.ipynb": {
+        "examples/simulation_baselines.py",
     },
-    "08_reviewer_revision_campaign_run.ipynb": {
-        "examples/run_reviewer_revision_campaign.py",
+    "simulations/oasis.ipynb": {
+        "examples/simulation_baselines.py",
     },
-    "Reviewer_FDR_reestimation.ipynb": {
+    "motorneurons/lpcmci.ipynb": {
+        "examples/empirical_baselines.py",
+    },
+    "motorneurons/oasis.ipynb": {
+        "examples/empirical_baselines.py",
+    },
+    "08_revision_campaign_run.ipynb": {
+        "examples/run_revision_campaign.py",
+    },
+    "fdr_reestimation.ipynb": {
         "examples/run_empirical_null_controls.py",
     },
     "Temporal_resolvability_screen.ipynb": {
@@ -59,15 +68,20 @@ SAFE_RUN_TOGGLES = {
         "RUN_LOCKED_GRID",
         "RUN_STRICT_ANALYSIS",
     ),
-    "05_reviewer_calibration_onset_run.ipynb": ("RUN_THRESHOLD", "RUN_ONSET"),
-    "06_reviewer_dynamic_extensions_run.ipynb": (
+    "05_calibration_onset_run.ipynb": ("RUN_THRESHOLD", "RUN_ONSET"),
+    "06_dynamic_extensions_run.ipynb": (
         "RUN_MIXED_FALL",
         "RUN_HYBRID",
     ),
-    "07_reviewer_baseline_benchmarks_run.ipynb": ("RUN_BASELINES",),
-    "08_reviewer_revision_campaign_run.ipynb": ("RUN_CAMPAIGN",),
-    "Reviewer_FDR_reestimation.ipynb": ("RUN_BH", "RUN_UNADJUSTED"),
+    "08_revision_campaign_run.ipynb": ("RUN_CAMPAIGN",),
+    "fdr_reestimation.ipynb": ("RUN_BH", "RUN_UNADJUSTED"),
     "Temporal_resolvability_screen.ipynb": ("RUN_SCREEN",),
+}
+READY_TO_RUN_TOGGLES = {
+    "simulations/lpcmci.ipynb": "RUN_LPCMCI",
+    "simulations/oasis.ipynb": "RUN_OASIS",
+    "motorneurons/lpcmci.ipynb": "RUN_LPCMCI",
+    "motorneurons/oasis.ipynb": "RUN_OASIS",
 }
 
 
@@ -87,6 +101,10 @@ def _code_cells(path: Path) -> list[str]:
     ]
 
 
+def _notebook_key(path: Path) -> str:
+    return path.relative_to(NOTEBOOK_ROOT).as_posix()
+
+
 class NotebookExecutionContractTests(unittest.TestCase):
     def test_notebooks_have_valid_json_and_compilable_code_cells(self) -> None:
         for path in _all_notebooks():
@@ -104,7 +122,9 @@ class NotebookExecutionContractTests(unittest.TestCase):
 
     def test_runner_notebooks_forward_resume_to_long_running_scripts(self) -> None:
         for path in _all_notebooks():
-            expected_scripts = RUNNER_NOTEBOOKS.get(path.name)
+            expected_scripts = RUNNER_NOTEBOOKS.get(
+                _notebook_key(path), RUNNER_NOTEBOOKS.get(path.name)
+            )
             if expected_scripts is None:
                 continue
             source = "\n".join(_code_cells(path))
@@ -137,13 +157,51 @@ class NotebookExecutionContractTests(unittest.TestCase):
 
     def test_safe_run_toggles_remain_disabled_by_default(self) -> None:
         for path in _all_notebooks():
-            toggles = SAFE_RUN_TOGGLES.get(path.name, ())
+            toggles = SAFE_RUN_TOGGLES.get(
+                _notebook_key(path), SAFE_RUN_TOGGLES.get(path.name, ())
+            )
             if not toggles:
                 continue
             source = "\n".join(_code_cells(path))
             for toggle in toggles:
                 with self.subTest(notebook=path.name, toggle=toggle):
                     self.assertRegex(source, rf"\b{re.escape(toggle)}\s*=\s*False\b")
+
+    def test_baseline_notebooks_are_ready_to_run_by_default(self) -> None:
+        for relative_path, toggle in READY_TO_RUN_TOGGLES.items():
+            path = NOTEBOOK_ROOT / relative_path
+            source = "\n".join(_code_cells(path))
+            with self.subTest(notebook=relative_path):
+                self.assertRegex(source, rf"\b{re.escape(toggle)}\s*=\s*True\b")
+                self.assertNotIn("--dry-run", source)
+
+    def test_baseline_notebooks_use_the_cgc_input_contracts(self) -> None:
+        for name in ("lpcmci.ipynb", "oasis.ipynb"):
+            simulation_source = "\n".join(
+                _code_cells(NOTEBOOK_ROOT / "simulations" / name)
+            )
+            motorneuron_source = "\n".join(
+                _code_cells(NOTEBOOK_ROOT / "motorneurons" / name)
+            )
+            with self.subTest(notebook=f"simulations/{name}"):
+                self.assertIn("N_RUNS_OUTER = 10", simulation_source)
+                self.assertIn("N_SEEDS = 20", simulation_source)
+                self.assertIn("N_STEPS = 3000", simulation_source)
+            with self.subTest(notebook=f"motorneurons/{name}"):
+                self.assertIn("FLUO_TYPES = 'dff,f_smooth'", motorneuron_source)
+                self.assertNotIn("--cases", motorneuron_source)
+
+        for name in ("c-GC.ipynb", "c-GC-star.ipynb"):
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / "simulations" / name))
+            with self.subTest(notebook=f"simulations/{name}"):
+                self.assertIn("static_input_digest(truth, fluo)", source)
+                self.assertIn('RESULTS_DIR / "input_manifest.csv"', source)
+
+        for name in ("c-GC_Motoneurons.ipynb", "c-GC-star_Motoneurons.ipynb"):
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / "motorneurons" / name))
+            with self.subTest(notebook=f"motorneurons/{name}"):
+                self.assertIn("array_input_digest(traces)", source)
+                self.assertIn('"input_digest": record["input_digest"]', source)
 
 
 if __name__ == "__main__":

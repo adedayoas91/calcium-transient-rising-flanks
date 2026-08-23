@@ -1,4 +1,4 @@
-"""Run the complete reviewer-revision experiment campaign in dependency order.
+"""Run the complete revision experiment campaign in dependency order.
 
 Every scientific stage is invoked with its own ``--resume`` flag.  This driver
 also skips only outputs whose ``summary.json`` explicitly reports
@@ -17,13 +17,14 @@ from typing import Sequence
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT_ROOT = Path("outputs/reviewer_revision_campaign")
+DEFAULT_OUTPUT_ROOT = Path("outputs/revision_campaign")
 CAMPAIGN_STAGES = (
     "empirical_fdr_bh",
     "empirical_fdr_unadjusted",
     "threshold_calibration",
     "mixed_fall",
-    "lpcmci_oasis",
+    "lpcmci_simulation",
+    "oasis_simulation",
     "hybrid_event",
     "adaptive_onset",
 )
@@ -95,7 +96,8 @@ def build_stages(
     unadjusted_dir = output_root / "empirical_fdr" / "unadjusted"
     threshold_dir = output_root / "threshold_calibration"
     mixed_fall_dir = output_root / "mixed_fall"
-    baselines_dir = output_root / "lpcmci_oasis"
+    lpcmci_dir = output_root / "lpcmci_simulation"
+    oasis_dir = output_root / "oasis_simulation"
     hybrid_dir = output_root / "hybrid_event"
     onset_dir = output_root / "adaptive_onset"
     return (
@@ -118,7 +120,7 @@ def build_stages(
             "threshold_calibration",
             (
                 python,
-                "examples/reviewer_calibration_onset.py",
+                "examples/calibration_onset.py",
                 "--components",
                 "threshold",
                 "--seeds",
@@ -135,7 +137,7 @@ def build_stages(
             "mixed_fall",
             (
                 python,
-                "examples/reviewer_dynamic_extensions.py",
+                "examples/dynamic_extensions.py",
                 "--methods",
                 "cgc,cgc-star",
                 "--grid",
@@ -151,25 +153,58 @@ def build_stages(
             mixed_fall_dir / "summary.json",
         ),
         Stage(
-            "lpcmci_oasis",
+            "lpcmci_simulation",
             (
                 python,
-                "examples/reviewer_baseline_benchmarks.py",
-                "--seeds",
-                seeds,
+                "examples/simulation_baselines.py",
+                "--components",
+                "lpcmci",
+                "--representations",
+                "full,deconvolved,rise,fall,fall_residual",
+                "--n-runs-outer",
+                "10",
+                "--n-seeds",
+                "20",
+                "--n-steps",
+                "3000",
                 "--n-cgc-surrogates",
                 str(n_surrogates),
                 "--output-dir",
-                str(baselines_dir),
+                str(lpcmci_dir),
                 "--resume",
             ),
-            baselines_dir / "summary.json",
+            lpcmci_dir / "summary.json",
+        ),
+        Stage(
+            "oasis_simulation",
+            (
+                python,
+                "examples/simulation_baselines.py",
+                "--components",
+                "oasis",
+                "--representations",
+                "full,deconvolved,oasis,rise,fall",
+                "--cgc-methods",
+                "cgc,cgc-star",
+                "--n-runs-outer",
+                "10",
+                "--n-seeds",
+                "20",
+                "--n-steps",
+                "3000",
+                "--n-cgc-surrogates",
+                str(n_surrogates),
+                "--output-dir",
+                str(oasis_dir),
+                "--resume",
+            ),
+            oasis_dir / "summary.json",
         ),
         Stage(
             "hybrid_event",
             (
                 python,
-                "examples/reviewer_dynamic_extensions.py",
+                "examples/dynamic_extensions.py",
                 "--methods",
                 "cgc,cgc-star",
                 "--grid",
@@ -188,7 +223,7 @@ def build_stages(
             "adaptive_onset",
             (
                 python,
-                "examples/reviewer_calibration_onset.py",
+                "examples/calibration_onset.py",
                 "--components",
                 "onset",
                 "--seeds",
