@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,28 @@ def _load_script_module():
 
 
 class SimulationBaselineScriptTests(unittest.TestCase):
+    def test_progress_state_records_the_in_flight_resume_unit(self) -> None:
+        script = _load_script_module()
+        config = {
+            "conditions": ["native"],
+            "n_runs_outer": 1,
+            "n_seeds_per_run": 2,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            output_dir = Path(temporary)
+            script._write_progress(
+                output_dir,
+                config=config,
+                completed_units={"0|native|1"},
+                status="running",
+                active_unit="0|native|2",
+            )
+            payload = json.loads((output_dir / script.PROGRESS_FILE).read_text())
+
+        self.assertEqual(payload["active_unit"], "0|native|2")
+        self.assertEqual(payload["completed_unit_count"], 1)
+        self.assertEqual(payload["expected_unit_count"], 2)
+
     def test_event_matching_is_one_to_one_with_tolerance(self) -> None:
         script = _load_script_module()
         tp, fp, fn, errors = script._event_counts(

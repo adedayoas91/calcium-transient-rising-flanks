@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
@@ -29,6 +30,7 @@ from calcium_transient_rising_flank import (
     static_gamma_from_tau,
     static_input_digest,
 )
+from calcium_transient_rising_flank.checkpointing import format_progress
 
 
 DEFAULT_OUTPUT_DIR = Path("outputs/simulation_baselines")
@@ -479,6 +481,7 @@ def rows_for_unit(
     components: Sequence[str] = COMPONENTS,
     representation_names: Sequence[str] = REPRESENTATIONS,
     cgc_methods: Sequence[str] = CGC_METHODS,
+    progress: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     matched = matched_static_dataset(
         run_index=run_index,
@@ -579,9 +582,19 @@ def rows_for_unit(
                 )
 
         if "lpcmci" in components:
+            fit_started_at = time.perf_counter()
+            if progress:
+                print(
+                    "[lpcmci] starting "
+                    f"representation {representation_index + 1}/{len(representation_names)}: "
+                    f"{representation_name} "
+                    f"(rois={representation.shape[0]}, timepoints={representation.shape[1]})",
+                    flush=True,
+                )
             lpcmci = LPCMCIAdapter(
                 tau_max=lpcmci_tau_max,
                 run_kwargs={"tau_min": 0, "pc_alpha": lpcmci_pc_alpha},
+                verbosity=1 if progress else 0,
             ).fit(representation)
             pag_path = (
                 pag_dir
@@ -597,6 +610,13 @@ def rows_for_unit(
                 val_matrix=lpcmci.val_matrix,
                 input_digest=np.asarray(matched["input_digest"]),
             )
+            if progress:
+                print(
+                    f"[lpcmci] finished in {time.perf_counter() - fit_started_at:.1f}s; "
+                    f"saved representation {representation_index + 1}/"
+                    f"{len(representation_names)}: {pag_path}",
+                    flush=True,
+                )
             projected = lpcmci.lossy_lagged_skeleton()
             skeleton_metrics = _skeleton_metrics(truth, projected)
             graph_rows.append(
@@ -777,12 +797,14 @@ def _write_progress(
     config: dict[str, Any],
     completed_units: set[str],
     status: str,
+    active_unit: str | None = None,
 ) -> None:
     payload = {
         "status": status,
         "config": config,
         "completed_units": sorted(completed_units),
         "completed_unit_count": len(completed_units),
+        "active_unit": active_unit,
         "expected_unit_count": (
             len(config["conditions"])
             * int(config["n_runs_outer"])
@@ -870,10 +892,21 @@ def main() -> None:
     completed_units: set[str] = set()
     event_rows: list[dict[str, Any]] = []
     graph_rows: list[dict[str, Any]] = []
+    previous_active_unit: str | None = None
+    total_units = len(unit_specs)
+    total_lpcmci_fits = total_units * len(representations)
+    print(
+        "[plan] "
+        f"{total_units} checkpoint units; "
+        f"{total_lpcmci_fits if 'lpcmci' in components else 0} LPCMCI fits; "
+        f"output={args.output_dir}",
+        flush=True,
+    )
     if args.resume and progress_path.exists():
         progress = json.loads(progress_path.read_text())
         if progress.get("config") != config:
             raise SystemExit("resume configuration does not match the saved run")
+        previous_active_unit = progress.get("active_unit")
         event_rows = _read_csv(event_partial)
         graph_rows = _read_csv(graph_partial)
         event_rows, graph_rows, completed_units = _recover_completed_units(
@@ -884,6 +917,29 @@ def main() -> None:
             representations=representations,
             cgc_methods=cgc_methods,
         )
+        print(
+            f"[resume] loaded and validated {len(completed_units)}/{total_units} "
+            "complete checkpoint units; completed units will be skipped",
+            flush=True,
+        )
+        if previous_active_unit and previous_active_unit not in completed_units:
+            print(
+                f"[resume] previous run stopped during {previous_active_unit}; "
+                "that whole outer-run/condition/seed unit will be recomputed",
+                flush=True,
+            )
+    elif args.resume:
+        print(
+            f"[resume] no saved progress found at {progress_path}; starting a new run",
+            flush=True,
+        )
+    else:
+        print("[resume] disabled; saved completed units will not be loaded", flush=True)
+
+    print(
+        format_progress(len(completed_units), total_units, label="Overall units"),
+        flush=True,
+    )
 
     _write_progress(
         args.output_dir,
@@ -895,6 +951,18 @@ def main() -> None:
         unit = _unit_key(run_index, condition, seed)
         if unit in completed_units:
             continue
+        print(
+            f"[unit] starting {len(completed_units) + 1}/{total_units}: "
+            f"run={run_index}, condition={condition}, seed={seed}",
+            flush=True,
+        )
+        _write_progress(
+            args.output_dir,
+            config=config,
+            completed_units=completed_units,
+            status="running",
+            active_unit=unit,
+        )
         new_event_rows, new_graph_rows = rows_for_unit(
             run_index=run_index,
             condition=condition,
@@ -909,6 +977,7 @@ def main() -> None:
             components=components,
             representation_names=representations,
             cgc_methods=cgc_methods,
+            progress=True,
         )
         event_rows.extend(new_event_rows)
         graph_rows.extend(new_graph_rows)
@@ -921,6 +990,15 @@ def main() -> None:
             config=config,
             completed_units=completed_units,
             status="running",
+        )
+        print(
+            format_progress(
+                len(completed_units),
+                total_units,
+                label="Overall units",
+            )
+            + f" | completed {unit}",
+            flush=True,
         )
 
     if event_rows:
@@ -986,6 +1064,11 @@ def main() -> None:
         config=config,
         completed_units=completed_units,
         status="complete",
+    )
+    print(
+        format_progress(total_units, total_units, label="Overall units")
+        + f" | complete; summary={args.output_dir / 'summary.json'}",
+        flush=True,
     )
 
 

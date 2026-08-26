@@ -18,6 +18,7 @@ from calcium_transient_rising_flank import (
     graph_summary,
     selected_frame_indices,
 )
+from calcium_transient_rising_flank.checkpointing import format_progress
 from calcium_transient_rising_flank.validation import (
     cross_recording_surrogate,
     cyclic_shift_surrogate,
@@ -873,6 +874,7 @@ def _write_progress(
     expected_units: int,
     expected_top_level_fits: int,
     status: str,
+    active_unit: str | None = None,
 ) -> None:
     payload = {
         "status": status,
@@ -881,6 +883,7 @@ def _write_progress(
         "completed_unit_count": len(completed_units),
         "expected_unit_count": expected_units,
         "expected_top_level_fit_count": expected_top_level_fits,
+        "active_unit": active_unit,
     }
     _atomic_write_text(
         output_dir / PROGRESS_FILE,
@@ -961,6 +964,7 @@ def main() -> None:
     completed_units: set[str] = set()
     rows: list[dict[str, Any]] = []
     manifest_entries: list[dict[str, Any]] = []
+    previous_active_unit: str | None = None
     if args.resume and progress_path.exists():
         with progress_path.open() as file:
             progress = json.load(file)
@@ -968,6 +972,7 @@ def main() -> None:
             raise SystemExit(
                 "resume configuration does not match the saved empirical run"
             )
+        previous_active_unit = progress.get("active_unit")
         rows = _read_csv(partial_rows_path)
         manifest_entries = _load_observed_graph_artifact_entries(args.output_dir)
         rows, completed_units = _recover_completed_units(
@@ -998,6 +1003,36 @@ def main() -> None:
         representations=representations,
         n_null_replicates=args.n_null_replicates,
     )
+    print(
+        "[plan] "
+        f"{expected_units} checkpoint units; {expected_top_level_fits} top-level fits; "
+        f"output={args.output_dir}",
+        flush=True,
+    )
+    if args.resume and progress_path.exists():
+        print(
+            f"[resume] loaded and validated {len(completed_units)}/{expected_units} "
+            "complete checkpoint units; completed units will be skipped",
+            flush=True,
+        )
+        if previous_active_unit is not None and previous_active_unit not in completed_units:
+            print(
+                f"[resume] previous run stopped during {previous_active_unit}; "
+                "that unit will be recomputed",
+                flush=True,
+            )
+    elif args.resume:
+        print(
+            f"[resume] no saved progress found at {progress_path}; starting a new run",
+            flush=True,
+        )
+    else:
+        print("[resume] disabled; saved completed units will not be loaded", flush=True)
+
+    print(
+        format_progress(len(completed_units), expected_units, label="Overall units"),
+        flush=True,
+    )
     _write_progress(
         args.output_dir,
         config=config,
@@ -1005,6 +1040,7 @@ def main() -> None:
         expected_units=expected_units,
         expected_top_level_fits=expected_top_level_fits,
         status="running",
+        active_unit=None,
     )
     for method_index, method in enumerate(methods):
         factory = _estimator_factory(args, method=method)
@@ -1013,6 +1049,19 @@ def main() -> None:
             unit = _unit_key(method, record)
             if unit in completed_units:
                 continue
+            print(
+                f"[unit] starting {len(completed_units) + 1}/{expected_units}: {unit}",
+                flush=True,
+            )
+            _write_progress(
+                args.output_dir,
+                config=config,
+                completed_units=completed_units,
+                expected_units=expected_units,
+                expected_top_level_fits=expected_top_level_fits,
+                status="running",
+                active_unit=unit,
+            )
             staged_artifacts: list[dict[str, Any]] = []
             rows.extend(
                 null_rows_for_recording(
@@ -1042,6 +1091,16 @@ def main() -> None:
                 expected_units=expected_units,
                 expected_top_level_fits=expected_top_level_fits,
                 status="running",
+                active_unit=None,
+            )
+            print(
+                format_progress(
+                    len(completed_units),
+                    expected_units,
+                    label="Overall units",
+                )
+                + f" | completed {unit}",
+                flush=True,
             )
 
     if not rows:
@@ -1086,8 +1145,13 @@ def main() -> None:
         expected_units=expected_units,
         expected_top_level_fits=expected_top_level_fits,
         status="complete",
+        active_unit=None,
     )
-    print(f"wrote {len(rows)} null-control rows to {args.output_dir}")
+    print(
+        format_progress(expected_units, expected_units, label="Overall units")
+        + f" | complete; wrote {len(rows)} null-control rows to {args.output_dir}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

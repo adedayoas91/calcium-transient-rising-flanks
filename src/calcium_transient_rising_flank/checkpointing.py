@@ -11,6 +11,27 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
+def format_progress(
+    completed: int,
+    total: int,
+    *,
+    label: str = "Progress",
+    width: int = 30,
+) -> str:
+    """Return a dependency-free text progress bar suitable for notebooks."""
+
+    if total < 1:
+        raise ValueError("total must be positive")
+    if completed < 0 or completed > total:
+        raise ValueError("completed must lie between zero and total")
+    if width < 1:
+        raise ValueError("width must be positive")
+    filled = width if completed == total else int(width * completed / total)
+    bar = "#" * filled + "-" * (width - filled)
+    percentage = 100.0 * completed / total
+    return f"{label}: [{bar}] {completed}/{total} ({percentage:5.1f}%)"
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)

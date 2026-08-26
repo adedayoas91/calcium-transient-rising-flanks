@@ -28,6 +28,7 @@ from calcium_transient_rising_flank import (
     w_ic,
     w_rc,
 )
+from calcium_transient_rising_flank.checkpointing import format_progress
 from calcium_transient_rising_flank.validation import simulate_calcium_dataset
 
 
@@ -484,6 +485,7 @@ def _write_progress(
     config: dict[str, Any],
     completed_seeds: set[int],
     status: str,
+    active_seed: int | None = None,
 ) -> None:
     payload = {
         "status": status,
@@ -491,6 +493,7 @@ def _write_progress(
         "completed_seeds": sorted(completed_seeds),
         "completed_seed_count": len(completed_seeds),
         "expected_seed_count": len(config["seeds"]),
+        "active_seed": active_seed,
     }
     _atomic_write_text(
         output_dir / PROGRESS_FILE,
@@ -526,10 +529,19 @@ def main() -> None:
     completed_seeds: set[int] = set()
     threshold_rows: list[dict[str, Any]] = []
     onset_rows: list[dict[str, Any]] = []
+    total_seeds = len(seeds)
+    previous_active_seed: int | None = None
+    print(
+        "[plan] "
+        f"{total_seeds} checkpoint seeds; components={','.join(components)}; "
+        f"output={args.output_dir}",
+        flush=True,
+    )
     if args.resume and progress_path.exists():
         progress = json.loads(progress_path.read_text())
         if progress.get("config") != config:
             raise SystemExit("resume configuration does not match the saved run")
+        previous_active_seed = progress.get("active_seed")
         if "threshold" in components:
             threshold_rows = _read_csv(threshold_partial)
         if "onset" in components:
@@ -546,16 +558,51 @@ def main() -> None:
         onset_rows = [
             row for row in onset_rows if int(row["seed"]) in completed_seeds
         ]
+        print(
+            f"[resume] loaded and validated {len(completed_seeds)}/{total_seeds} "
+            "complete checkpoint seeds; completed seeds will be skipped",
+            flush=True,
+        )
+        if previous_active_seed is not None and previous_active_seed not in completed_seeds:
+            print(
+                f"[resume] previous run stopped during seed={previous_active_seed}; "
+                "that seed will be recomputed",
+                flush=True,
+            )
+    elif args.resume:
+        print(
+            f"[resume] no saved progress found at {progress_path}; starting a new run",
+            flush=True,
+        )
+    else:
+        print("[resume] disabled; saved completed seeds will not be loaded", flush=True)
+
+    print(
+        format_progress(len(completed_seeds), total_seeds, label="Overall seeds"),
+        flush=True,
+    )
 
     _write_progress(
         args.output_dir,
         config=config,
         completed_seeds=completed_seeds,
         status="running",
+        active_seed=None,
     )
     for seed in seeds:
         if seed in completed_seeds:
             continue
+        print(
+            f"[seed] starting {len(completed_seeds) + 1}/{total_seeds}: seed={seed}",
+            flush=True,
+        )
+        _write_progress(
+            args.output_dir,
+            config=config,
+            completed_seeds=completed_seeds,
+            status="running",
+            active_seed=seed,
+        )
         if "threshold" in components:
             threshold_rows.extend(
                 threshold_rows_for_seed(
@@ -583,6 +630,12 @@ def main() -> None:
             config=config,
             completed_seeds=completed_seeds,
             status="running",
+            active_seed=None,
+        )
+        print(
+            format_progress(len(completed_seeds), total_seeds, label="Overall seeds")
+            + f" | completed seed={seed}",
+            flush=True,
         )
 
     outputs: list[str] = []
@@ -613,6 +666,12 @@ def main() -> None:
         config=config,
         completed_seeds=completed_seeds,
         status="complete",
+        active_seed=None,
+    )
+    print(
+        format_progress(total_seeds, total_seeds, label="Overall seeds")
+        + f" | complete; summary={args.output_dir / 'summary.json'}",
+        flush=True,
     )
 
 

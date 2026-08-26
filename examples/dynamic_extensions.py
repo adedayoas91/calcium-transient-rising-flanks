@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from calcium_transient_rising_flank import CausalisedGC, DynamicSimulationConfig
+from calcium_transient_rising_flank.checkpointing import format_progress
 from calcium_transient_rising_flank.robustness import (
     SyntheticCondition,
     run_synthetic_grid,
@@ -597,6 +598,7 @@ def _write_resume_state(
     total_units: int,
     completed_units: int,
     status: str,
+    active_unit: str | None = None,
 ) -> None:
     _write_json(
         output_dir / RESUME_STATE_JSON,
@@ -605,6 +607,7 @@ def _write_resume_state(
             "completed_units": completed_units,
             "total_units": total_units,
             "config_signature": config_signature,
+            "active_unit": active_unit,
         },
     )
 
@@ -682,9 +685,23 @@ def main() -> None:
     rows: list[dict[str, float | int | bool | str | None]] = []
     completed_keys: set[tuple[str, str, str, int]] = set()
     skipped_units = 0
+    total_units = len(run_specs)
+    resume_state_path = args.output_dir / RESUME_STATE_JSON
+    previous_active_unit: str | None = None
+    print(
+        "[plan] "
+        f"{total_units} checkpoint units; methods={','.join(methods)}; "
+        f"grid={','.join(spec.name for spec in specs)}; output={args.output_dir}",
+        flush=True,
+    )
     if args.resume:
         config_signature = _resume_signature(config)
         _validate_resume_signature(args.output_dir, config_signature)
+        if resume_state_path.exists():
+            resume_state = json.loads(resume_state_path.read_text())
+            previous_active_unit = resume_state.get("active_unit")
+        else:
+            resume_state = None
         existing_rows = _complete_grid_rows(_read_grid_rows(grid_path))
         rows = [row for row in existing_rows if _row_run_key(row) in target_keys]
         completed_keys = _completed_run_keys(rows)
@@ -692,15 +709,55 @@ def main() -> None:
         _write_resume_state(
             args.output_dir,
             config_signature=config_signature,
-            total_units=len(run_specs),
+            total_units=total_units,
             completed_units=len(completed_keys),
             status="running",
+            active_unit=None,
         )
+        if resume_state is None:
+            print(
+                f"[resume] no saved progress found at {resume_state_path}; starting a new run",
+                flush=True,
+            )
+        else:
+            print(
+                f"[resume] loaded and validated {len(completed_keys)}/{total_units} "
+                "complete checkpoint units; completed units will be skipped",
+                flush=True,
+            )
+            if previous_active_unit is not None:
+                print(
+                    f"[resume] previous run stopped during {previous_active_unit}; "
+                    "that unit will be recomputed unless it already finished",
+                    flush=True,
+                )
+    else:
+        print("[resume] disabled; saved completed units will not be loaded", flush=True)
 
+    print(
+        format_progress(len(completed_keys), total_units, label="Overall units"),
+        flush=True,
+    )
+
+    processed_units = len(completed_keys)
     for method, spec, condition, seed in run_specs:
         key = (method, spec.name, condition.name, seed)
         if args.resume and key in completed_keys:
             continue
+        unit_label = f"{method}|{spec.name}|{condition.name}|seed={seed}"
+        print(
+            f"[unit] starting {processed_units + 1}/{total_units}: {unit_label}",
+            flush=True,
+        )
+        if args.resume:
+            _write_resume_state(
+                args.output_dir,
+                config_signature=config_signature,
+                total_units=total_units,
+                completed_units=processed_units,
+                status="running",
+                active_unit=unit_label,
+            )
         rows.extend(
             _rows_for_spec(
                 adjacency=adjacency,
@@ -714,16 +771,27 @@ def main() -> None:
                 no_fdr=args.no_fdr,
             )
         )
+        processed_units += 1
         if args.resume:
             completed_keys.add(key)
             _write_csv(grid_path, rows)
             _write_resume_state(
                 args.output_dir,
                 config_signature=config_signature,
-                total_units=len(run_specs),
-                completed_units=len(completed_keys),
+                total_units=total_units,
+                completed_units=processed_units,
                 status="running",
+                active_unit=None,
             )
+        print(
+            format_progress(
+                processed_units,
+                total_units,
+                label="Overall units",
+            )
+            + f" | completed {unit_label}",
+            flush=True,
+        )
 
     summary_rows = _summary_rows(rows)
     contrast_rows = _contrast_rows(summary_rows)
@@ -745,18 +813,24 @@ def main() -> None:
         _write_resume_state(
             args.output_dir,
             config_signature=config_signature,
-            total_units=len(run_specs),
-            completed_units=len(completed_keys),
+            total_units=total_units,
+            completed_units=processed_units,
             status="complete",
+            active_unit=None,
         )
         print(
-            f"wrote {len(rows)} rows to {args.output_dir} "
-            f"(resumed {skipped_units} completed units; "
-            f"ran {len(run_specs) - skipped_units} units)"
+            format_progress(total_units, total_units, label="Overall units")
+            + f" | complete; wrote {len(rows)} rows to {args.output_dir} "
+            f"(resumed {skipped_units} completed units; ran {total_units - skipped_units} units)",
+            flush=True,
         )
         return
 
-    print(f"wrote {len(rows)} rows to {args.output_dir}")
+    print(
+        format_progress(total_units, total_units, label="Overall units")
+        + f" | complete; wrote {len(rows)} rows to {args.output_dir}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

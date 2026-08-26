@@ -16,6 +16,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from calcium_transient_rising_flank.checkpointing import format_progress
+
 
 DEFAULT_DYNAMIC_OUTPUT_DIR = Path("outputs/validation_results/dynamic_episodic_locked")
 DEFAULT_NULL_OUTPUT_DIR = Path("outputs/empirical_null_controls")
@@ -30,6 +32,7 @@ class PipelineStep:
     name: str
     command: tuple[str, ...]
     skip_reason: str | None = None
+    marker_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +162,7 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
                 and _summary_complete(config.dynamic_output_dir / "summary.json"),
                 marker=config.dynamic_output_dir / "summary.json",
             ),
+            config.dynamic_output_dir / "summary.json",
         )
     )
     null_command = [
@@ -185,6 +189,7 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
                 and _summary_complete(config.null_output_dir / "summary.json"),
                 marker=config.null_output_dir / "summary.json",
             ),
+            config.null_output_dir / "summary.json",
         )
     )
     stability_command = [
@@ -211,6 +216,7 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
                 and _summary_complete(config.stability_output_dir / "summary.json"),
                 marker=config.stability_output_dir / "summary.json",
             ),
+            config.stability_output_dir / "summary.json",
         )
     )
     steps.extend(
@@ -295,16 +301,66 @@ def run_steps(
     cwd: Path | None = None,
 ) -> None:
     env = _base_env()
+    total_steps = len(steps)
+    completed_steps = 0
+    print(f"[plan] {total_steps} publication-gate stages", flush=True)
+    print(
+        format_progress(0, total_steps, label="Pipeline stages"),
+        flush=True,
+    )
     for step in steps:
-        print(f"{step.number}. {step.name}")
+        print(f"{step.number}. {step.name}", flush=True)
         if step.skip_reason is not None:
-            print(f"   skipped: {step.skip_reason}")
+            completed_steps += 1
+            print(f"   skipped: {step.skip_reason}", flush=True)
+            if step.marker_path is not None and _summary_complete(step.marker_path):
+                print(
+                    format_progress(
+                        completed_steps,
+                        total_steps,
+                        label="Pipeline stages",
+                    )
+                    + f" | loaded completed stage {step.name}",
+                    flush=True,
+                )
             continue
-        print(f"   {format_command(step.command)}")
+        print(f"   {format_command(step.command)}", flush=True)
+        if "--resume" in step.command:
+            print("   resume enabled for this stage", flush=True)
         if execute:
+            print(
+                f"[stage] starting {completed_steps + 1}/{total_steps}: {step.name}",
+                flush=True,
+            )
             subprocess.run(step.command, cwd=cwd, env=env, check=True)
+            completed_steps += 1
+            print(
+                format_progress(
+                    completed_steps,
+                    total_steps,
+                    label="Pipeline stages",
+                )
+                + f" | completed {step.name}",
+                flush=True,
+            )
+        else:
+            print(
+                format_progress(
+                    completed_steps,
+                    total_steps,
+                    label="Pipeline stages",
+                )
+                + " | preview only",
+                flush=True,
+            )
     if not execute:
-        print("\nDry run only. Re-run with --execute to launch these commands.")
+        print("\nDry run only. Re-run with --execute to launch these commands.", flush=True)
+    else:
+        print(
+            format_progress(total_steps, total_steps, label="Pipeline stages")
+            + " | complete",
+            flush=True,
+        )
 
 
 def parse_args() -> argparse.Namespace:

@@ -1,4 +1,7 @@
+import contextlib
 import importlib.util
+import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +24,24 @@ def _load_script_module():
 
 
 class EmpiricalBaselinesScriptTests(unittest.TestCase):
+    def test_progress_state_records_the_in_flight_fit(self) -> None:
+        script = _load_script_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            output_dir = Path(temporary)
+            script._write_progress(
+                output_dir,
+                config={"components": ["lpcmci"]},
+                completed={"lpcmci|full|dff|F3T1"},
+                expected_count=2,
+                status="running",
+                active_unit="lpcmci|rise|dff|F3T1",
+            )
+            payload = json.loads((output_dir / script.PROGRESS_FILE).read_text())
+
+        self.assertEqual(payload["active_unit"], "lpcmci|rise|dff|F3T1")
+        self.assertEqual(payload["completed_unit_count"], 1)
+        self.assertEqual(payload["expected_unit_count"], 2)
+
     def test_load_records_matches_cgc_dataframe_and_requires_every_unit(self) -> None:
         script = _load_script_module()
         with tempfile.TemporaryDirectory() as temporary:
@@ -236,13 +257,16 @@ class EmpiricalBaselinesScriptTests(unittest.TestCase):
                 alpha=0.05,
                 seed=10,
             )
-            pag_row = script.run_lpcmci(
-                record,
-                output_dir=output_dir,
-                representation="full",
-                tau_max=1,
-                pc_alpha=0.05,
-            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                pag_row = script.run_lpcmci(
+                    record,
+                    output_dir=output_dir,
+                    representation="full",
+                    tau_max=1,
+                    pc_alpha=0.05,
+                    progress=True,
+                )
             for row in (oasis_row, graph_row, pag_row):
                 artifact = Path(row["artifact_path"])
                 self.assertTrue(artifact.is_file())
@@ -251,6 +275,8 @@ class EmpiricalBaselinesScriptTests(unittest.TestCase):
 
         self.assertEqual(graph_row["retained_edges"], 1)
         self.assertEqual(pag_row["skeleton_retained_edges"], 1)
+        self.assertIn("[lpcmci] entering Tigramite", output.getvalue())
+        self.assertIn("[lpcmci] fit finished", output.getvalue())
 
 
 if __name__ == "__main__":

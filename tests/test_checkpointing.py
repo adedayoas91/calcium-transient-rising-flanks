@@ -3,10 +3,29 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from calcium_transient_rising_flank.checkpointing import JsonUnitCheckpointStore
+from calcium_transient_rising_flank.checkpointing import (
+    JsonUnitCheckpointStore,
+    format_progress,
+)
 
 
 class JsonUnitCheckpointStoreTests(unittest.TestCase):
+    def test_format_progress_reports_counts_and_percentage(self) -> None:
+        self.assertEqual(
+            format_progress(3, 4, label="Fits", width=8),
+            "Fits: [######--] 3/4 ( 75.0%)",
+        )
+        self.assertEqual(
+            format_progress(4, 4, label="Fits", width=8),
+            "Fits: [########] 4/4 (100.0%)",
+        )
+
+    def test_format_progress_rejects_invalid_counts(self) -> None:
+        for completed, total in ((-1, 2), (3, 2), (0, 0)):
+            with self.subTest(completed=completed, total=total):
+                with self.assertRaises(ValueError):
+                    format_progress(completed, total)
+
     def test_initialize_rejects_resume_when_config_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory)

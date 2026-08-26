@@ -35,6 +35,7 @@ from calcium_transient_rising_flank.representations import estimate_decay
 from calcium_transient_rising_flank.checkpointing import (
     JsonUnitCheckpointStore,
     atomic_write_json,
+    format_progress,
 )
 
 
@@ -463,6 +464,19 @@ def run_resolvability_grid(
         raise ValueError("all grid dimensions must be non-empty")
     truth = stable_truth_graph()
     rows: list[dict[str, Any]] = []
+    total_units = len(regimes) * len(native_delays) * len(seeds)
+    completed_units = sum(
+        1
+        for regime in regimes
+        for native_delay in native_delays
+        for seed in seeds
+        if resume
+        and checkpoint_store is not None
+        and checkpoint_store.load_rows(
+            f"{regime.name}|delay={int(native_delay)}|seed={int(seed)}"
+        )
+        is not None
+    )
     for regime in regimes:
         for native_delay in native_delays:
             if native_delay >= 48:
@@ -474,8 +488,21 @@ def run_resolvability_grid(
                     if completed_rows is not None:
                         rows.extend(completed_rows)
                         if progress:
-                            print(f"resumed {unit_id}", flush=True)
+                            print(
+                                format_progress(
+                                    completed_units,
+                                    total_units,
+                                    label="Overall units",
+                                )
+                                + f" | loaded checkpoint {unit_id}",
+                                flush=True,
+                            )
                         continue
+                if progress:
+                    print(
+                        f"[unit] starting {completed_units + 1}/{total_units}: {unit_id}",
+                        flush=True,
+                    )
                 unit_start = len(rows)
                 gamma = gamma_values(regime, int(seed))
                 dataset = simulate_calcium_dataset(
@@ -652,11 +679,17 @@ def run_resolvability_grid(
                                     )
                 if checkpoint_store is not None:
                     checkpoint_store.save_rows(unit_id, rows[unit_start:])
-            if progress:
-                print(
-                    f"completed regime={regime.name} delay={native_delay}",
-                    flush=True,
-                )
+                completed_units += 1
+                if progress:
+                    print(
+                        format_progress(
+                            completed_units,
+                            total_units,
+                            label="Overall units",
+                        )
+                        + f" | completed {unit_id}",
+                        flush=True,
+                    )
     return rows
 
 
@@ -1043,6 +1076,34 @@ def main() -> None:
         config,
     )
     checkpoint_store.initialize(resume=args.resume)
+    unit_ids = [
+        f"{regime.name}|delay={int(native_delay)}|seed={int(seed)}"
+        for regime in REGIMES
+        for native_delay in args.native_delays
+        for seed in args.seeds
+    ]
+    resumable_units = sum(
+        1
+        for unit_id in unit_ids
+        if args.resume and checkpoint_store.load_rows(unit_id) is not None
+    )
+    total_units = len(unit_ids)
+    print(
+        f"[plan] {total_units} checkpoint units; output={args.output_dir}",
+        flush=True,
+    )
+    if args.resume:
+        print(
+            f"[resume] loaded and validated {resumable_units}/{total_units} "
+            "complete checkpoint units; incomplete units will be recomputed",
+            flush=True,
+        )
+    else:
+        print("[resume] disabled; saved completed units will not be loaded", flush=True)
+    print(
+        format_progress(resumable_units, total_units, label="Overall units"),
+        flush=True,
+    )
     rows = run_resolvability_grid(
         regimes=REGIMES,
         native_delays=args.native_delays,
@@ -1060,10 +1121,15 @@ def main() -> None:
     evaluation = evaluate_map(cells)
     write_outputs(args.output_dir, rows, cells, evaluation, config)
     checkpoint_store.finish(
-        completed_units=len(REGIMES) * len(args.native_delays) * len(args.seeds),
-        total_units=len(REGIMES) * len(args.native_delays) * len(args.seeds),
+        completed_units=total_units,
+        total_units=total_units,
     )
-    print(json.dumps(evaluation, indent=2, sort_keys=True))
+    print(
+        format_progress(total_units, total_units, label="Overall units")
+        + f" | complete; summary={args.output_dir / 'summary.json'}",
+        flush=True,
+    )
+    print(json.dumps(evaluation, indent=2, sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":

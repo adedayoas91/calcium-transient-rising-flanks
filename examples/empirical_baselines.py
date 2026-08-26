@@ -14,6 +14,7 @@ import argparse
 import csv
 import hashlib
 import json
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
@@ -29,6 +30,7 @@ from calcium_transient_rising_flank import (
     build_representations,
     graph_summary,
 )
+from calcium_transient_rising_flank.checkpointing import format_progress
 
 
 DEFAULT_DATA_FILE = Path(
@@ -480,11 +482,22 @@ def run_lpcmci(
     representation: str,
     tau_max: int,
     pc_alpha: float,
+    progress: bool = False,
 ) -> dict[str, Any]:
     values = _representation(record["traces"], representation)
+    started_at = time.perf_counter()
+    if progress:
+        print(
+            "[lpcmci] entering Tigramite "
+            f"(representation={representation}, rois={values.shape[0]}, "
+            f"timepoints={values.shape[1]}, tau_max={tau_max}, "
+            f"pc_alpha={pc_alpha})",
+            flush=True,
+        )
     result = LPCMCIAdapter(
         tau_max=tau_max,
         run_kwargs={"tau_min": 0, "pc_alpha": pc_alpha},
+        verbosity=1 if progress else 0,
     ).fit(values)
     skeleton = result.lossy_lagged_skeleton()
     artifact = _pag_artifact_path(
@@ -500,6 +513,12 @@ def run_lpcmci(
         lossy_lagged_skeleton=skeleton,
         input_digest=np.asarray(record["input_digest"]),
     )
+    if progress:
+        print(
+            f"[lpcmci] fit finished in {time.perf_counter() - started_at:.1f}s; "
+            f"saved {artifact}",
+            flush=True,
+        )
     skeleton_summary = graph_summary(
         skeleton.astype(float),
         record["mid"],
@@ -615,6 +634,7 @@ def _write_progress(
     completed: set[str],
     expected_count: int,
     status: str,
+    active_unit: str | None = None,
 ) -> None:
     _atomic_write_text(
         output_dir / PROGRESS_FILE,
@@ -625,6 +645,7 @@ def _write_progress(
                 "completed_units": sorted(completed),
                 "completed_unit_count": len(completed),
                 "expected_unit_count": expected_count,
+                "active_unit": active_unit,
             },
             indent=2,
             sort_keys=True,
@@ -730,16 +751,46 @@ def main() -> None:
         oasis_outputs=oasis_outputs,
         cgc_methods=cgc_methods,
     )
+    expected_count = len(expected_relative)
+    previous_active_unit: str | None = None
+    print(
+        f"[plan] {expected_count} checkpoint units; output={args.output_dir}",
+        flush=True,
+    )
     if args.resume and progress_path.exists():
         progress = json.loads(progress_path.read_text())
         if progress.get("config") != config:
             raise SystemExit("resume configuration does not match the saved run")
+        previous_active_unit = progress.get("active_unit")
         oasis_rows, graph_rows, completed = _recover_completed_units(
             output_dir=args.output_dir,
             expected=expected_relative,
             oasis_rows=_read_csv(oasis_partial),
             graph_rows=_read_csv(graph_partial),
         )
+        print(
+            f"[resume] loaded and validated {len(completed)}/{expected_count} "
+            "complete checkpoint units; completed units will be skipped",
+            flush=True,
+        )
+        if previous_active_unit and previous_active_unit not in completed:
+            print(
+                f"[resume] previous run stopped during {previous_active_unit}; "
+                "that in-flight fit will restart",
+                flush=True,
+            )
+    elif args.resume:
+        print(
+            f"[resume] no saved progress found at {progress_path}; starting a new run",
+            flush=True,
+        )
+    else:
+        print("[resume] disabled; saved completed units will not be loaded", flush=True)
+
+    print(
+        format_progress(len(completed), expected_count, label="Overall units"),
+        flush=True,
+    )
 
     _write_csv(
         args.output_dir / "input_manifest.csv",
@@ -762,13 +813,26 @@ def main() -> None:
         args.output_dir,
         config=config,
         completed=completed,
-        expected_count=len(expected_relative),
+        expected_count=expected_count,
         status="running",
     )
     for record in records:
         if "oasis" in components:
             transform_unit = _oasis_transform_unit(record)
             if transform_unit not in completed:
+                print(
+                    f"[unit] starting {len(completed) + 1}/{expected_count}: "
+                    f"{transform_unit}",
+                    flush=True,
+                )
+                _write_progress(
+                    args.output_dir,
+                    config=config,
+                    completed=completed,
+                    expected_count=expected_count,
+                    status="running",
+                    active_unit=transform_unit,
+                )
                 oasis_rows.append(
                     run_oasis_transform(record, output_dir=args.output_dir)
                 )
@@ -778,8 +842,15 @@ def main() -> None:
                     args.output_dir,
                     config=config,
                     completed=completed,
-                    expected_count=len(expected_relative),
+                    expected_count=expected_count,
                     status="running",
+                )
+                print(
+                    format_progress(
+                        len(completed), expected_count, label="Overall units"
+                    )
+                    + f" | completed {transform_unit}",
+                    flush=True,
                 )
             for method in cgc_methods:
                 for oasis_output in oasis_outputs:
@@ -790,6 +861,18 @@ def main() -> None:
                     )
                     if unit in completed:
                         continue
+                    print(
+                        f"[unit] starting {len(completed) + 1}/{expected_count}: {unit}",
+                        flush=True,
+                    )
+                    _write_progress(
+                        args.output_dir,
+                        config=config,
+                        completed=completed,
+                        expected_count=expected_count,
+                        status="running",
+                        active_unit=unit,
+                    )
                     graph_rows.append(
                         run_oasis_graph(
                             record,
@@ -808,8 +891,15 @@ def main() -> None:
                         args.output_dir,
                         config=config,
                         completed=completed,
-                        expected_count=len(expected_relative),
+                        expected_count=expected_count,
                         status="running",
+                    )
+                    print(
+                        format_progress(
+                            len(completed), expected_count, label="Overall units"
+                        )
+                        + f" | completed {unit}",
+                        flush=True,
                     )
 
         if "lpcmci" in components:
@@ -817,6 +907,18 @@ def main() -> None:
                 unit = _lpcmci_unit(record, representation=representation)
                 if unit in completed:
                     continue
+                print(
+                    f"[unit] starting {len(completed) + 1}/{expected_count}: {unit}",
+                    flush=True,
+                )
+                _write_progress(
+                    args.output_dir,
+                    config=config,
+                    completed=completed,
+                    expected_count=expected_count,
+                    status="running",
+                    active_unit=unit,
+                )
                 graph_rows.append(
                     run_lpcmci(
                         record,
@@ -824,6 +926,7 @@ def main() -> None:
                         representation=representation,
                         tau_max=args.lpcmci_tau_max,
                         pc_alpha=args.lpcmci_pc_alpha,
+                        progress=True,
                     )
                 )
                 completed.add(unit)
@@ -832,8 +935,15 @@ def main() -> None:
                     args.output_dir,
                     config=config,
                     completed=completed,
-                    expected_count=len(expected_relative),
+                    expected_count=expected_count,
                     status="running",
+                )
+                print(
+                    format_progress(
+                        len(completed), expected_count, label="Overall units"
+                    )
+                    + f" | completed {unit}",
+                    flush=True,
                 )
 
     _write_csv(args.output_dir / "oasis_preprocessing_rows.csv", oasis_rows)
@@ -874,8 +984,13 @@ def main() -> None:
         args.output_dir,
         config=config,
         completed=completed,
-        expected_count=len(expected_relative),
+        expected_count=expected_count,
         status="complete",
+    )
+    print(
+        format_progress(expected_count, expected_count, label="Overall units")
+        + f" | complete; summary={args.output_dir / 'summary.json'}",
+        flush=True,
     )
 
 

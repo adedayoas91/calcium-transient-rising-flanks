@@ -25,6 +25,7 @@ from calcium_transient_rising_flank import (
 from calcium_transient_rising_flank.checkpointing import (
     JsonUnitCheckpointStore,
     atomic_write_json,
+    format_progress,
 )
 
 
@@ -289,6 +290,17 @@ def run_screen(
     if n_nulls < 1:
         raise ValueError("n_nulls must be positive")
     rows: list[dict[str, Any]] = []
+    total_units = len(records)
+    completed_units = sum(
+        1
+        for record in records
+        if resume
+        and checkpoint_store is not None
+        and checkpoint_store.load_rows(
+            f"{record['case']}|{record['recording']}"
+        )
+        is not None
+    )
     for record_index, record in enumerate(records):
         unit_id = f"{record['case']}|{record['recording']}"
         if resume and checkpoint_store is not None:
@@ -296,8 +308,21 @@ def run_screen(
             if completed_rows is not None:
                 rows.extend(completed_rows)
                 if progress:
-                    print(f"resumed {unit_id}", flush=True)
+                    print(
+                        format_progress(
+                            completed_units,
+                            total_units,
+                            label="Overall units",
+                        )
+                        + f" | loaded checkpoint {unit_id}",
+                        flush=True,
+                    )
                 continue
+        if progress:
+            print(
+                f"[unit] starting {completed_units + 1}/{total_units}: {unit_id}",
+                flush=True,
+            )
         unit_start = len(rows)
         traces = np.asarray(record["traces"], dtype=float)
         rise = build_representations(traces, tolerance=tolerance).rise
@@ -333,6 +358,17 @@ def run_screen(
             )
             if checkpoint_store is not None:
                 checkpoint_store.save_rows(unit_id, rows[unit_start:])
+            completed_units += 1
+            if progress:
+                print(
+                    format_progress(
+                        completed_units,
+                        total_units,
+                        label="Overall units",
+                    )
+                    + f" | completed {unit_id}",
+                    flush=True,
+                )
             continue
         for lag_index, max_onset_lag in enumerate(max_onset_lags):
             for deadband_index, deadband in enumerate(deadbands):
@@ -443,9 +479,15 @@ def run_screen(
                     )
         if checkpoint_store is not None:
             checkpoint_store.save_rows(unit_id, rows[unit_start:])
+        completed_units += 1
         if progress:
             print(
-                f"completed case={record['case']} recording={record['recording']}",
+                format_progress(
+                    completed_units,
+                    total_units,
+                    label="Overall units",
+                )
+                + f" | completed {unit_id}",
                 flush=True,
             )
     return rows
@@ -654,6 +696,28 @@ def main() -> None:
         config,
     )
     checkpoint_store.initialize(resume=args.resume)
+    unit_ids = [f"{record['case']}|{record['recording']}" for record in records]
+    resumable_units = sum(
+        1
+        for unit_id in unit_ids
+        if args.resume and checkpoint_store.load_rows(unit_id) is not None
+    )
+    print(
+        f"[plan] {len(records)} checkpoint units; output={args.output_dir}",
+        flush=True,
+    )
+    if args.resume:
+        print(
+            f"[resume] loaded and validated {resumable_units}/{len(records)} "
+            "complete checkpoint units; incomplete units will be recomputed",
+            flush=True,
+        )
+    else:
+        print("[resume] disabled; saved completed units will not be loaded", flush=True)
+    print(
+        format_progress(resumable_units, len(records), label="Overall units"),
+        flush=True,
+    )
     rows = run_screen(
         records,
         max_onset_lags=args.max_onset_lags,
@@ -676,7 +740,11 @@ def main() -> None:
         completed_units=len(records),
         total_units=len(records),
     )
-    print(args.output_dir)
+    print(
+        format_progress(len(records), len(records), label="Overall units")
+        + f" | complete; output={args.output_dir}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

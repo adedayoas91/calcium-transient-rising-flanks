@@ -27,6 +27,7 @@ from calcium_transient_rising_flank.validation import (
 from calcium_transient_rising_flank.checkpointing import (
     JsonUnitCheckpointStore,
     atomic_write_json,
+    format_progress,
 )
 
 DEFAULT_DATA_DIR = Path("data/motoneurons")
@@ -481,6 +482,36 @@ def main() -> None:
     )
     checkpoint_store.initialize(resume=args.resume)
     rows: list[dict[str, Any]] = []
+    unit_ids = [
+        f"{method}|{record['case']}|{record['recording']}"
+        for method in methods
+        for record in records
+    ]
+    total_units = len(unit_ids)
+    resumable_units = sum(
+        1
+        for unit_id in unit_ids
+        if args.resume and checkpoint_store.load_rows(unit_id) is not None
+    )
+    completed_units = resumable_units
+    print(
+        "[plan] "
+        f"{total_units} checkpoint units; methods={','.join(methods)}; "
+        f"output={args.output_dir}",
+        flush=True,
+    )
+    if args.resume:
+        print(
+            f"[resume] loaded and validated {resumable_units}/{total_units} "
+            "complete checkpoint units; incomplete units will be recomputed",
+            flush=True,
+        )
+    else:
+        print("[resume] disabled; saved completed units will not be loaded", flush=True)
+    print(
+        format_progress(resumable_units, total_units, label="Overall units"),
+        flush=True,
+    )
     for method_index, method in enumerate(methods):
         factory = _estimator_factory(args, method=method)
         seed_offset = args.seed + method_index * 100_000
@@ -491,7 +522,20 @@ def main() -> None:
             )
             if completed_rows is not None:
                 rows.extend(completed_rows)
+                print(
+                    format_progress(
+                        completed_units,
+                        total_units,
+                        label="Overall units",
+                    )
+                    + f" | loaded checkpoint {unit_id}",
+                    flush=True,
+                )
                 continue
+            print(
+                f"[unit] starting {completed_units + 1}/{total_units}: {unit_id}",
+                flush=True,
+            )
             unit_rows = stability_rows_for_recording(
                 record,
                 estimator_factory=factory,
@@ -506,6 +550,16 @@ def main() -> None:
             )
             checkpoint_store.save_rows(unit_id, unit_rows)
             rows.extend(unit_rows)
+            completed_units += 1
+            print(
+                format_progress(
+                    completed_units,
+                    total_units,
+                    label="Overall units",
+                )
+                + f" | completed {unit_id}",
+                flush=True,
+            )
 
     if not rows:
         raise SystemExit("no stability rows were generated")
@@ -530,10 +584,14 @@ def main() -> None:
         },
     )
     checkpoint_store.finish(
-        completed_units=len(methods) * len(records),
-        total_units=len(methods) * len(records),
+        completed_units=total_units,
+        total_units=total_units,
     )
-    print(f"wrote {len(rows)} empirical stability rows to {args.output_dir}")
+    print(
+        format_progress(total_units, total_units, label="Overall units")
+        + f" | complete; wrote {len(rows)} empirical stability rows to {args.output_dir}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

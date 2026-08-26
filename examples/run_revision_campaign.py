@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from calcium_transient_rising_flank.checkpointing import format_progress
+
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOT = Path("outputs/revision_campaign")
@@ -306,6 +308,15 @@ def main() -> None:
     state_path = output_root / "campaign_state.json"
     completed: list[str] = []
     records: list[dict[str, object]] = []
+    total_stages = len(selected)
+    print(
+        f"[plan] {total_stages} campaign stages selected; output_root={output_root}",
+        flush=True,
+    )
+    print(
+        format_progress(0, total_stages, label="Campaign stages"),
+        flush=True,
+    )
     _write_campaign_state(
         state_path,
         status="preview" if args.dry_run else "running",
@@ -317,6 +328,15 @@ def main() -> None:
         command_text = " ".join(stage.command)
         if _summary_is_complete(stage.summary_path):
             completed.append(stage.name)
+            print(
+                format_progress(
+                    len(completed),
+                    total_stages,
+                    label="Campaign stages",
+                )
+                + f" | loaded completed stage {stage.name} from {stage.summary_path}",
+                flush=True,
+            )
             records.append(
                 {
                     "stage": stage.name,
@@ -327,7 +347,11 @@ def main() -> None:
             )
             continue
         if args.dry_run:
-            print(f"[{stage.name}] {command_text}")
+            print(
+                f"[preview] {stage.name} ({len(completed) + 1}/{total_stages})",
+                flush=True,
+            )
+            print(command_text, flush=True)
             records.append(
                 {
                     "stage": stage.name,
@@ -337,7 +361,11 @@ def main() -> None:
                 }
             )
             continue
-        print(f"[{stage.name}] {command_text}", flush=True)
+        print(
+            f"[stage] starting {len(completed) + 1}/{total_stages}: {stage.name}",
+            flush=True,
+        )
+        print(command_text, flush=True)
         completed_process = subprocess.run(
             stage.command,
             cwd=PACKAGE_ROOT,
@@ -385,6 +413,15 @@ def main() -> None:
                 f"stage {stage.name} exited successfully without a complete summary"
             )
         completed.append(stage.name)
+        print(
+            format_progress(
+                len(completed),
+                total_stages,
+                label="Campaign stages",
+            )
+            + f" | completed {stage.name}",
+            flush=True,
+        )
         records.append(
             {
                 "stage": stage.name,
@@ -409,6 +446,17 @@ def main() -> None:
         completed_stages=completed,
         stage_records=records,
     )
+    if args.dry_run:
+        print(
+            "Dry run only. Re-run without --dry-run to execute the pending stages.",
+            flush=True,
+        )
+    else:
+        print(
+            format_progress(total_stages, total_stages, label="Campaign stages")
+            + f" | complete; state={state_path}",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

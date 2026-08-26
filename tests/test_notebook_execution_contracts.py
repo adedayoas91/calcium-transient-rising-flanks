@@ -124,6 +124,22 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 for index, source in enumerate(code_cells):
                     compile(source, f"{path.name}#cell{index}", "exec")
 
+    def test_long_running_notebooks_expose_live_progress(self) -> None:
+        for path in _all_notebooks():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not payload.get("metadata", {}).get("rising_flanks", {}).get(
+                "long_running"
+            ):
+                continue
+            source = "\n".join(_code_cells(path))
+            with self.subTest(notebook=_notebook_key(path)):
+                self.assertTrue(
+                    "format_progress" in source or "progress_path" in source,
+                    msg=f"{path.name} has no visible progress instrumentation",
+                )
+                if "subprocess.run" in source:
+                    self.assertIn("PYTHONUNBUFFERED", source)
+
     def test_notebooks_do_not_disable_fdr_inline(self) -> None:
         for path in _all_notebooks():
             source = "\n".join(_code_cells(path))
