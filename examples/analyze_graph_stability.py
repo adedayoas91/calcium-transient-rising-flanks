@@ -82,7 +82,7 @@ def _matrix(payload_or_matrix: Any) -> np.ndarray:
 
 def _generic_summary(matrix: np.ndarray) -> dict[str, float | int]:
     values = _matrix(matrix)
-    off_diag = ~np.eye(values.shape[0], dtype=bool)
+    off_diag: np.ndarray = ~np.eye(values.shape[0], dtype=bool)
     retained = values > 0.0
     out_strength = values.sum(axis=1)
     in_strength = values.sum(axis=0)
@@ -165,6 +165,9 @@ def _load_full_trace_records(
 
     records: list[dict[str, Any]] = []
     for raw in raw_records.values():
+        representation = raw.get("representation") or "full_trace"
+        if representation not in {"full", "full_trace"}:
+            continue
         fluo_type = raw.get("fluo_type")
         records.append(
             _record(

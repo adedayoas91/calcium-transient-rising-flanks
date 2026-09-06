@@ -286,6 +286,12 @@ c-GC/c-GC* recovery; it is not labeled as a causal learner. Both regenerate the
 same static grid consumed by `c-GC.ipynb` and `c-GC-star.ipynb`, and both emit
 per-unit input digests for an exact equality check.
 
+The c-GC and c-GC* notebooks now fit all five LPCMCI representations (`full`,
+`deconvolved`, `rise`, `fall`, and `fall_residual`). With the default 10 outer
+runs, five conditions, 20 seeds, and five representations, each notebook writes
+exactly 5,000 data rows to its `grid_runs.csv`. The final row count is also
+recorded as `n_grid_rows` in `summary.json`.
+
 ## 2. Dynamic-A Synthetic Validation
 
 6. `notebooks/simulations/01_dynamic_episodic_validation_run.ipynb`
@@ -313,6 +319,12 @@ Set `TAU` and `N_PASTS` in the parameter cell before running. When `TAU` is set,
 14. `notebooks/motorneurons/oasis.ipynb`
 
 Run these only when the saved graph pickle artifacts under `outputs/motorneurons/` need to be rebuilt.
+
+The two motoneuron c-GC notebooks use the same six inputs as LPCMCI: `dff` and
+`f_smooth` for F3T1, F3T2, and F5T2. Each input is fit in the same five
+representations, so each c-GC notebook should finish with 30 cached fits and 30
+rows in its `*_summary_rows.csv`. The cache metadata records
+`expected_fit_count = 30`.
 
 The lowercase baseline notebooks are independent wrappers. LPCMCI checkpoints
 each fluorescence-type--recording--representation PAG fit. OASIS checkpoints trace

@@ -166,12 +166,15 @@ def _full_trace_rows(path: Path, method: str) -> list[dict[str, Any]]:
     normalized = []
     for row in rows:
         values = dict(row)
+        representation = values.get("representation") or "full_trace"
+        if representation not in {"full", "full_trace"}:
+            continue
         values["case"] = values.get("case") or values.get("fluo_type")
         values["description"] = values.get("description") or (
             "full-trace baseline from saved c-GC weighted cache"
         )
         values["method"] = values.get("method") or method
-        values["representation"] = values.get("representation") or "full_trace"
+        values["representation"] = "full_trace"
         values["graph_label"] = values.get("graph_label") or values["representation"]
         values["delta_w_ic_rise_minus_fall"] = None
         values["delta_w_rc_rise_minus_fall"] = None

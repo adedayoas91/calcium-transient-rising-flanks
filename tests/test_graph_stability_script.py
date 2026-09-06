@@ -20,6 +20,37 @@ def _load_script_module():
 
 
 class GraphStabilityScriptTests(unittest.TestCase):
+    def test_full_trace_loader_ignores_other_matched_representations(self) -> None:
+        script = _load_script_module()
+        matrix = np.eye(3)
+        cache = {
+            "records": {
+                (1, 1, "dff", "full"): {
+                    "weighted_adjacency": matrix,
+                    "mid": 1,
+                    "representation": "full",
+                    "recording": "F1T1",
+                    "fluo_type": "dff",
+                },
+                (1, 1, "dff", "deconvolved"): {
+                    "weighted_adjacency": matrix,
+                    "mid": 1,
+                    "representation": "deconvolved",
+                    "recording": "F1T1",
+                    "fluo_type": "dff",
+                },
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "full.pkl"
+            with path.open("wb") as file:
+                pickle.dump(cache, file)
+            records = script._load_full_trace_records(path, "motoneurons", "cgc")
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["representation"], "full_trace")
+
     def test_summarizes_rise_fall_overlap_and_pairwise_stability(self) -> None:
         script = _load_script_module()
         rise = np.array(

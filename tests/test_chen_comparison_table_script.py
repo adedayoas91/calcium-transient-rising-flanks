@@ -72,6 +72,24 @@ class ChenComparisonTableScriptTests(unittest.TestCase):
                     "retained_edges": 1,
                     "edge_opportunities": 2,
                     "total_weight": 1.0,
+                    "representation": "full",
+                },
+                {
+                    "dataset": "motoneurons",
+                    "recording": "F1T1",
+                    "fish": 1,
+                    "trial": 1,
+                    "fluo_type": "dff",
+                    "method": "cgc",
+                    "representation": "deconvolved",
+                    "n_nodes": 4,
+                    "mid": 2,
+                    "w_ic": 0.5,
+                    "w_rc": None,
+                    "edge_density": 0.25,
+                    "retained_edges": 1,
+                    "edge_opportunities": 2,
+                    "total_weight": 0.5,
                 }
             ]
             with (root / "cgc_motoneurons_summary_rows.pkl").open("wb") as file:
@@ -84,6 +102,9 @@ class ChenComparisonTableScriptTests(unittest.TestCase):
         self.assertIn("chen_improved_gc", methods)
         self.assertIn("rising_flank_cgc", methods)
         self.assertIn("cgc", methods)
+        cgc_rows = [row for row in rows if row["method"] == "cgc"]
+        self.assertEqual(len(cgc_rows), 1)
+        self.assertEqual(cgc_rows[0]["representation"], "full_trace")
         rise = next(row for row in rows if row.get("representation") == "rise")
         fall = next(row for row in rows if row.get("representation") == "fall")
         self.assertGreater(rise["delta_w_ic_rise_minus_fall"], 0.0)

@@ -263,12 +263,33 @@ class NotebookExecutionContractTests(unittest.TestCase):
             with self.subTest(notebook=f"simulations/{name}"):
                 self.assertIn("static_input_digest(truth, fluo)", source)
                 self.assertIn('RESULTS_DIR / "input_manifest.csv"', source)
+                self.assertIn('os.environ.get("RF_N_STEPS", "3000")', source)
+                self.assertIn('os.environ.get("RF_N_SEEDS", "20")', source)
+                self.assertIn(
+                    'GRID_REPS = ["full", "deconvolved", "rise", "fall", "fall_residual"]',
+                    source,
+                )
+                self.assertIn("all_grid_records.extend", source)
+                self.assertIn("grid_df = pd.DataFrame(all_grid_records)", source)
+                self.assertIn('"expected_grid_rows": int(TOTAL_GRID_FITS)', source)
 
         for name in ("c-GC_Motoneurons.ipynb", "c-GC-star_Motoneurons.ipynb"):
             source = "\n".join(_code_cells(NOTEBOOK_ROOT / "motorneurons" / name))
             with self.subTest(notebook=f"motorneurons/{name}"):
                 self.assertIn("array_input_digest(traces)", source)
                 self.assertIn('"input_digest": record["input_digest"]', source)
+                self.assertIn(
+                    'REPRESENTATIONS = ("full", "deconvolved", "rise", "fall", "fall_residual")',
+                    source,
+                )
+                self.assertIn('os.environ.get("RF_FLUO_TYPES", "dff,f_smooth")', source)
+                self.assertIn(
+                    'os.environ.get("RF_RECORDINGS", "F3T1,F3T2,F5T2")', source
+                )
+                self.assertIn("expected - actual", source)
+                self.assertIn("total_fits = len(records) * len(REPRESENTATIONS)", source)
+                self.assertIn('representation_inputs[representation]', source)
+                self.assertIn('"expected_fit_count": total_fits', source)
 
 
 if __name__ == "__main__":
