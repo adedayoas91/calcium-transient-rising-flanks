@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -20,6 +21,61 @@ def _load_script_module():
 
 
 class SimulationBaselineScriptTests(unittest.TestCase):
+    def test_oasis_cgc_configuration_matches_the_reference_notebooks(self) -> None:
+        script = _load_script_module()
+        args = SimpleNamespace(
+            n_runs_outer=10,
+            n_seeds=20,
+            n_steps=3000,
+            n_cgc_surrogates=1000,
+            lpcmci_tau_max=2,
+            lpcmci_pc_alpha=0.05,
+            event_tolerance=2,
+        )
+
+        oasis = script._config(
+            args,
+            components=("oasis",),
+            representations=("full", "deconvolved", "oasis", "rise", "fall"),
+            cgc_methods=("cgc", "cgc-star"),
+        )
+        lpcmci = script._config(
+            args,
+            components=("lpcmci",),
+            representations=("full", "deconvolved", "rise", "fall"),
+            cgc_methods=("cgc", "cgc-star"),
+        )
+
+        self.assertEqual(
+            oasis["cgc"],
+            {
+                "alpha": 0.01,
+                "beta": 0.001,
+                "n_pasts": 2,
+                "n_lags": 1,
+                "fdr": False,
+                "simulation": True,
+            },
+        )
+        self.assertEqual(oasis["resume_schema_version"], 5)
+        self.assertEqual(lpcmci["resume_schema_version"], 4)
+        self.assertNotIn("cgc", lpcmci)
+
+    def test_incompatible_output_is_preserved_before_restart(self) -> None:
+        script = _load_script_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            output_dir = Path(temporary) / "oasis"
+            output_dir.mkdir()
+            (output_dir / "progress.json").write_text("old")
+
+            archive = script._archive_incompatible_output(
+                output_dir, {"resume_schema_version": 4}
+            )
+
+            self.assertTrue((archive / "progress.json").is_file())
+            self.assertTrue(output_dir.is_dir())
+            self.assertEqual(list(output_dir.iterdir()), [])
+
     def test_progress_state_records_the_in_flight_resume_unit(self) -> None:
         script = _load_script_module()
         config = {

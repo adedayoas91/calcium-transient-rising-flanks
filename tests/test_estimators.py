@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -195,6 +196,31 @@ class EstimatorTests(unittest.TestCase):
         self.assertEqual(corrected[0, 0], 0.05)
         self.assertEqual(corrected[0, 1], 0.1)
         self.assertEqual(corrected[1, 1], 1.0)
+
+    def test_unadjusted_cgc_applies_separate_alpha_and_beta_thresholds(self) -> None:
+        core = SimpleNamespace(
+            data=np.zeros((2, 20)),
+            inv_corr_=np.ones((4, 2)),
+            pVal_corr_=np.ones((4, 2)),
+            pVal_inv_corr_=np.ones((4, 2)),
+            pair_diagnostics_=None,
+        )
+        core.pVal_corr_[2, 1] = 0.005
+        core.pVal_inv_corr_[2, 1] = 0.005
+        core.pVal_corr_[3, 0] = 0.005
+        core.pVal_inv_corr_[3, 0] = 0.0005
+        estimator = CausalisedGC(
+            max_lag=1,
+            n_surrogates=10,
+            alpha=0.01,
+            beta=0.001,
+            fdr=False,
+        )
+
+        result = estimator._graph_from_core(core, physical=False)
+
+        self.assertFalse(result.adjacency[0, 1])
+        self.assertTrue(result.adjacency[1, 0])
 
     def test_fixed_tau_is_separate_from_history_depth(self) -> None:
         rng = np.random.default_rng(14)

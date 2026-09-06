@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import time
 from collections import Counter
@@ -53,6 +54,11 @@ TRANSMISSION_PROBABILITY = 0.85
 REPRESENTATION_TOLERANCE = 0.05
 IPSILATERAL_FRACTION = 0.65
 PROPAGATION_DELAY = 1
+CGC_ALPHA = 0.01
+CGC_BETA = 0.001
+CGC_N_PASTS = 2
+CGC_N_LAGS = 1
+CGC_FDR = False
 
 
 def _condition_config(condition: str) -> dict[str, float | int]:
@@ -420,13 +426,15 @@ def _cgc_graph(
     seed: int,
 ) -> np.ndarray:
     estimator = CausalisedGC(
-        max_lag=1,
+        max_lag=CGC_N_LAGS,
         n_surrogates=n_surrogates,
-        alpha=0.05,
-        fdr=True,
-        event_mode="physical",
+        alpha=CGC_ALPHA,
+        beta=CGC_BETA,
+        fdr=CGC_FDR,
+        event_mode="compressed",
         method=method,
         simulation=True,
+        n_pasts=CGC_N_PASTS,
         random_state=seed,
     )
     return estimator.fit(representation).adjacency
@@ -576,8 +584,11 @@ def rows_for_unit(
                             int(matched["middle"]),
                         )["w_ic"],
                         "n_estimator_surrogates": n_cgc_surrogates,
-                        "alpha": 0.05,
-                        "fdr": True,
+                        "alpha": CGC_ALPHA,
+                        "beta": CGC_BETA,
+                        "n_pasts": CGC_N_PASTS,
+                        "n_lags": CGC_N_LAGS,
+                        "fdr": CGC_FDR,
                     }
                 )
 
@@ -650,8 +661,8 @@ def _config(
     representations: Sequence[str],
     cgc_methods: Sequence[str],
 ) -> dict[str, Any]:
-    return {
-        "resume_schema_version": 4,
+    config: dict[str, Any] = {
+        "resume_schema_version": 5 if "oasis" in components else 4,
         "input_contract": "static-cgc-grid-v1",
         "conditions": list(CONDITIONS),
         "base_seed": BASE_SEED,
@@ -680,6 +691,34 @@ def _config(
         "oasis": {"penalty": 1, "optimize_g": 0, "kinetics": "auto_ar1"},
         "pag_projection_policy": "raw PAG is primary; lagged skeleton is lossy",
     }
+    if "oasis" in components:
+        config["cgc"] = {
+            "alpha": CGC_ALPHA,
+            "beta": CGC_BETA,
+            "n_pasts": CGC_N_PASTS,
+            "n_lags": CGC_N_LAGS,
+            "fdr": CGC_FDR,
+            "simulation": True,
+        }
+    return config
+
+
+def _archive_incompatible_output(output_dir: Path, saved_config: Any) -> Path:
+    """Preserve an incompatible run beside a newly initialized output directory."""
+
+    digest = hashlib.sha256(
+        json.dumps(saved_config, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:12]
+    candidate = output_dir.with_name(f"{output_dir.name}.incompatible-{digest}")
+    suffix = 1
+    while candidate.exists():
+        candidate = output_dir.with_name(
+            f"{output_dir.name}.incompatible-{digest}-{suffix}"
+        )
+        suffix += 1
+    output_dir.replace(candidate)
+    output_dir.mkdir(parents=True, exist_ok=False)
+    return candidate
 
 
 def _unit_key(run_index: int, condition: str, seed: int) -> str:
@@ -843,6 +882,14 @@ def parse_args() -> argparse.Namespace:
         help="Downstream methods for OASIS preprocessing: cgc,cgc-star",
     )
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--restart-incompatible-resume",
+        action="store_true",
+        help=(
+            "When --resume finds a different saved configuration, preserve the old "
+            "output directory beside the new run and restart from zero"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -905,18 +952,32 @@ def main() -> None:
     if args.resume and progress_path.exists():
         progress = json.loads(progress_path.read_text())
         if progress.get("config") != config:
-            raise SystemExit("resume configuration does not match the saved run")
-        previous_active_unit = progress.get("active_unit")
-        event_rows = _read_csv(event_partial)
-        graph_rows = _read_csv(graph_partial)
-        event_rows, graph_rows, completed_units = _recover_completed_units(
-            event_rows=event_rows,
-            graph_rows=graph_rows,
-            unit_specs=unit_specs,
-            components=components,
-            representations=representations,
-            cgc_methods=cgc_methods,
-        )
+            if not args.restart_incompatible_resume:
+                raise SystemExit("resume configuration does not match the saved run")
+            archive_dir = _archive_incompatible_output(
+                args.output_dir, progress.get("config")
+            )
+            print(
+                "[resume] preserved incompatible output at "
+                f"{archive_dir}; restarting with the current configuration",
+                flush=True,
+            )
+            progress_path = args.output_dir / PROGRESS_FILE
+            event_partial = args.output_dir / EVENT_PARTIAL_FILE
+            graph_partial = args.output_dir / GRAPH_PARTIAL_FILE
+            progress = {}
+        else:
+            previous_active_unit = progress.get("active_unit")
+            event_rows = _read_csv(event_partial)
+            graph_rows = _read_csv(graph_partial)
+            event_rows, graph_rows, completed_units = _recover_completed_units(
+                event_rows=event_rows,
+                graph_rows=graph_rows,
+                unit_specs=unit_specs,
+                components=components,
+                representations=representations,
+                cgc_methods=cgc_methods,
+            )
         print(
             f"[resume] loaded and validated {len(completed_units)}/{total_units} "
             "complete checkpoint units; completed units will be skipped",
@@ -1004,6 +1065,18 @@ def main() -> None:
     if event_rows:
         _write_csv(args.output_dir / "event_recovery_rows.csv", event_rows)
     _write_csv(args.output_dir / "graph_recovery_rows.csv", graph_rows)
+    expected_methods = (
+        (len(cgc_methods) if "oasis" in components else 0)
+        + (1 if "lpcmci" in components else 0)
+    )
+    expected_graph_rows = total_units * len(representations) * expected_methods
+    expected_event_rows = total_units * 4 if "oasis" in components else 0
+    if len(graph_rows) != expected_graph_rows or len(event_rows) != expected_event_rows:
+        raise RuntimeError(
+            "Completed baseline row count does not match the declared grid: "
+            f"graph {len(graph_rows)}/{expected_graph_rows}, "
+            f"event {len(event_rows)}/{expected_event_rows}"
+        )
     manifest_by_unit: dict[str, dict[str, Any]] = {}
     for row in graph_rows:
         unit = _unit_key(
@@ -1046,6 +1119,9 @@ def main() -> None:
     summary = {
         "status": "complete",
         "config": config,
+        "expected_unit_count": total_units,
+        "expected_event_rows": expected_event_rows,
+        "expected_graph_rows": expected_graph_rows,
         "n_event_rows": len(event_rows),
         "n_graph_rows": len(graph_rows),
         "interpretation": interpretation,

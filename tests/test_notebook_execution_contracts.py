@@ -28,9 +28,11 @@ RUNNER_NOTEBOOKS = {
     },
     "simulations/lpcmci.ipynb": {
         "examples/simulation_baselines.py",
+        "examples/simulation_baseline_diagnostics.py",
     },
     "simulations/oasis.ipynb": {
         "examples/simulation_baselines.py",
+        "examples/simulation_baseline_diagnostics.py",
     },
     "motorneurons/lpcmci.ipynb": {
         "examples/empirical_baselines.py",
@@ -156,8 +158,8 @@ class NotebookExecutionContractTests(unittest.TestCase):
             source = "\n".join(_code_cells(path))
             with self.subTest(notebook=path.name):
                 self.assertTrue(
-                    any(script in source for script in expected_scripts),
-                    msg=f"{path.name} does not call the expected runner script",
+                    all(script in source for script in expected_scripts),
+                    msg=f"{path.name} does not call every expected runner script",
                 )
                 self.assertIn("--resume", source)
 
@@ -254,9 +256,23 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 self.assertIn("N_RUNS_OUTER = 10", simulation_source)
                 self.assertIn("N_SEEDS = 20", simulation_source)
                 self.assertIn("N_STEPS = 3000", simulation_source)
+                self.assertIn("N_NULL = 6", simulation_source)
+                self.assertIn(
+                    "examples/simulation_baseline_diagnostics.py",
+                    simulation_source,
+                )
             with self.subTest(notebook=f"motorneurons/{name}"):
                 self.assertIn("FLUO_TYPES = 'dff,f_smooth'", motorneuron_source)
                 self.assertNotIn("--cases", motorneuron_source)
+
+        oasis_source = "\n".join(
+            _code_cells(NOTEBOOK_ROOT / "simulations" / "oasis.ipynb")
+        )
+        self.assertIn(
+            "REPRESENTATIONS = 'full,deconvolved,oasis,rise,fall,fall_residual'",
+            oasis_source,
+        )
+        self.assertIn("--restart-incompatible-resume", oasis_source)
 
         for name in ("c-GC.ipynb", "c-GC-star.ipynb"):
             source = "\n".join(_code_cells(NOTEBOOK_ROOT / "simulations" / name))

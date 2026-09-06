@@ -688,16 +688,23 @@ class CausalisedGC:
             core.inv_corr_[lag_rows].reshape(tested_lags.size, n_nodes, n_nodes),
             nan=0.0,
         )
-        p_values_by_lag = np.nan_to_num(
-            np.maximum(
-                core.pVal_corr_[lag_rows],
-                core.pVal_inv_corr_[lag_rows],
-            ).reshape(tested_lags.size, n_nodes, n_nodes),
+        correlation_p_values_by_lag = np.nan_to_num(
+            core.pVal_corr_[lag_rows].reshape(tested_lags.size, n_nodes, n_nodes),
             nan=1.0,
+        )
+        conditional_p_values_by_lag = np.nan_to_num(
+            core.pVal_inv_corr_[lag_rows].reshape(tested_lags.size, n_nodes, n_nodes),
+            nan=1.0,
+        )
+        p_values_by_lag = np.maximum(
+            correlation_p_values_by_lag,
+            conditional_p_values_by_lag,
         )
         best = np.argmax(scores_by_lag, axis=0)
         scores = self._at_best_lag(scores_by_lag, best)
         p_values = self._at_best_lag(p_values_by_lag, best)
+        correlation_p_values = self._at_best_lag(correlation_p_values_by_lag, best)
+        conditional_p_values = self._at_best_lag(conditional_p_values_by_lag, best)
         best_lags = np.take_along_axis(
             np.broadcast_to(tested_lags[:, None, None], scores_by_lag.shape),
             best[np.newaxis, :, :],
@@ -718,7 +725,9 @@ class CausalisedGC:
                     eligible_mask=candidate_mask,
                 )
             else:
-                adjacency = p_values <= self.alpha
+                adjacency = (correlation_p_values <= self.alpha) & (
+                    conditional_p_values <= self.beta
+                )
         else:
             adjacency = scores > self.score_threshold
         adjacency = np.asarray(adjacency, dtype=bool)

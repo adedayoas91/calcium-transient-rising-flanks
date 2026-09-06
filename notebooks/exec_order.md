@@ -100,7 +100,12 @@ The lowercase baseline notebooks start their result runs when their launch cell
 is executed; they do not default to preview or dry-run mode. Simulation baseline
 units reproduce the static c-GC/c-GC* grid exactly: 10 outer networks, 20 seeded
 recordings per condition, 3,000 frames, and the native/noisy/slow-decay/
-low-framerate/shared-input conditions. Motorneuron baseline units read the same
+low-framerate/shared-input conditions. After the matched grid completes, each
+simulation notebook automatically runs `simulation_baseline_diagnostics.py` to
+produce the same H1-H4 analysis families as c-GC/c-GC*: transient
+characterization, representative recovery, locked rise/fall comparisons,
+cyclic-shift/reverse-time/fall comparators, paired `W_IC`, and noise/frame-rate
+sweeps. Motorneuron baseline units read the same
 deduplicated `dff` and `f_smooth` records from
 `df_motorneurons_F3T1_F3T2_F5T2.pkl` as both c-GC notebooks. Each baseline output
 root contains `input_manifest.csv`; matching unit keys must have identical
@@ -154,10 +159,24 @@ uv run --no-sync python examples/simulation_baselines.py \
 
 # OASIS simulation baseline
 uv run --no-sync python examples/simulation_baselines.py \
-  --components oasis --representations full,deconvolved,oasis,rise,fall \
+  --components oasis --representations full,deconvolved,oasis,rise,fall,fall_residual \
   --cgc-methods cgc,cgc-star --n-runs-outer 10 --n-seeds 20 --n-steps 3000 \
-  --n-cgc-surrogates 1000 --resume \
+  --n-cgc-surrogates 1000 --resume --restart-incompatible-resume \
   --output-dir outputs/revision_campaign/oasis_simulation
+
+# Full LPCMCI H1-H4 analysis after the matched grid
+uv run --no-sync python examples/simulation_baseline_diagnostics.py \
+  --baseline lpcmci \
+  --baseline-dir outputs/revision_campaign/lpcmci_simulation \
+  --output-dir outputs/revision_campaign/lpcmci_simulation/full_analysis \
+  --n-null 6 --resume
+
+# Full OASIS + downstream c-GC/c-GC* H1-H4 analysis after the matched grid
+uv run --no-sync python examples/simulation_baseline_diagnostics.py \
+  --baseline oasis \
+  --baseline-dir outputs/revision_campaign/oasis_simulation \
+  --output-dir outputs/revision_campaign/oasis_simulation/full_analysis \
+  --n-null 6 --resume
 
 # LPCMCI motorneuron baseline
 uv run --no-sync python examples/empirical_baselines.py \
@@ -193,6 +212,9 @@ uv run python examples/calibration_onset.py \
   saved configuration before accepting partial rows.
 - Do not change seeds, methods, grids, thresholds, or output directories while
   resuming. A configuration mismatch exits instead of mixing incompatible rows.
+  The OASIS notebook explicitly opts into a safe exception for the old
+  five-representation configuration: the whole incompatible directory is renamed
+  to `oasis_simulation.incompatible-<digest>` before the corrected run starts.
 - Before comparing separate LPCMCI and OASIS runs, join their
   `input_manifest.csv` files on the full unit key and require exact equality of
   `input_digest`. The same digests identify the inputs used by c-GC/c-GC*.
@@ -284,13 +306,30 @@ in parallel. LPCMCI preserves raw PAG tensors and reports its lagged skeleton
 only as a lossy support projection. OASIS reports event recovery and downstream
 c-GC/c-GC* recovery; it is not labeled as a causal learner. Both regenerate the
 same static grid consumed by `c-GC.ipynb` and `c-GC-star.ipynb`, and both emit
-per-unit input digests for an exact equality check.
+per-unit input digests for an exact equality check. Their downstream c-GC/c-GC*
+fits use the same reference settings: 1,000 permutations, `n_pasts=2`,
+`n_lags=1`, `alpha=0.01`, and `beta=0.001` without BH correction.
 
 The c-GC and c-GC* notebooks now fit all five LPCMCI representations (`full`,
 `deconvolved`, `rise`, `fall`, and `fall_residual`). With the default 10 outer
 runs, five conditions, 20 seeds, and five representations, each notebook writes
 exactly 5,000 data rows to its `grid_runs.csv`. The final row count is also
 recorded as `n_grid_rows` in `summary.json`.
+
+The two lowercase notebooks now continue beyond that grid. With the committed
+defaults, use these completion sentinels:
+
+| Notebook/stage | Progress terminal value | Final row/file sentinel |
+|---|---:|---:|
+| LPCMCI matched grid | 1,000 / 1,000 units | 5,000 rows in `graph_recovery_rows.csv`; 5,000 `.npz` files in `raw_pag/` |
+| LPCMCI full analysis | 224 / 224 units and fits | 224 `.npz` files in `full_analysis/graph_artifacts/`; 9 null rows; 210 robustness rows |
+| OASIS matched grid | 1,000 / 1,000 units | 12,000 rows in `graph_recovery_rows.csv`; 4,000 rows in `event_recovery_rows.csv` |
+| OASIS full analysis | 225 / 225 units; 450 / 450 graph fits | 450 `.npz` graph artifacts; 18 null rows; 420 robustness rows; 440 event-diagnostic rows |
+
+Read `progress.json` in the baseline root while the matched grid is running,
+then `full_analysis/progress.json` for the H1-H4 stage. A stage is finished only
+when its `summary.json` says `"status": "complete"`; the row counts above are
+independent checks that no scenario silently went missing.
 
 ## 2. Dynamic-A Synthetic Validation
 
