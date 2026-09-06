@@ -274,6 +274,26 @@ class NotebookExecutionContractTests(unittest.TestCase):
         )
         self.assertIn("--restart-incompatible-resume", oasis_source)
 
+    def test_baseline_notebooks_expose_each_reference_analysis_section(self) -> None:
+        required_sections = (
+            "H1 — kinetic asymmetry and transient characterization",
+            "H2 — representation recovery and locked condition analysis",
+            "Null and negative-comparator checks",
+            "Ipsilateral consistency",
+            "H4 — robustness to noise and frame-rate reduction",
+        )
+        for name in ("lpcmci.ipynb", "oasis.ipynb"):
+            text = (NOTEBOOK_ROOT / "simulations" / name).read_text()
+            with self.subTest(notebook=name):
+                for section in required_sections:
+                    self.assertIn(section, text)
+                self.assertIn("null_comparator_rows.csv", text)
+                self.assertIn("wic_delta_by_condition.csv", text)
+                self.assertIn("robustness_framerate.csv", text)
+
+        oasis_text = (NOTEBOOK_ROOT / "simulations" / "oasis.ipynb").read_text()
+        self.assertIn("kept separate for downstream c-GC and c-GC*", oasis_text)
+
         for name in ("c-GC.ipynb", "c-GC-star.ipynb"):
             source = "\n".join(_code_cells(NOTEBOOK_ROOT / "simulations" / name))
             with self.subTest(notebook=f"simulations/{name}"):

@@ -319,6 +319,12 @@ recorded as `n_grid_rows` in `summary.json`.
 The two lowercase notebooks now continue beyond that grid. With the committed
 defaults, use these completion sentinels:
 
+The notebook files remain method-specific and separate:
+`c-GC.ipynb`, `c-GC-star.ipynb`, `lpcmci.ipynb`, and `oasis.ipynb`. The two
+baseline notebooks contain their own visible H1, H2, null/negative-comparator,
+ipsilateral-consistency, and H4 result sections. They share only the resumable
+calculation helper; outputs are never combined across notebook output roots.
+
 | Notebook/stage | Progress terminal value | Final row/file sentinel |
 |---|---:|---:|
 | LPCMCI matched grid | 1,000 / 1,000 units | 5,000 rows in `graph_recovery_rows.csv`; 5,000 `.npz` files in `raw_pag/` |
