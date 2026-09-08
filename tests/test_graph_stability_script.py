@@ -20,7 +20,7 @@ def _load_script_module():
 
 
 class GraphStabilityScriptTests(unittest.TestCase):
-    def test_full_trace_loader_ignores_other_matched_representations(self) -> None:
+    def test_method_loader_keeps_all_matched_representations(self) -> None:
         script = _load_script_module()
         matrix = np.eye(3)
         cache = {
@@ -46,10 +46,11 @@ class GraphStabilityScriptTests(unittest.TestCase):
             path = Path(tmp) / "full.pkl"
             with path.open("wb") as file:
                 pickle.dump(cache, file)
-            records = script._load_full_trace_records(path, "motoneurons", "cgc")
+            records = script._load_method_records(path, "cgc")
 
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), 2)
         self.assertEqual(records[0]["representation"], "full_trace")
+        self.assertEqual(records[1]["representation"], "deconvolved")
 
     def test_summarizes_rise_fall_overlap_and_pairwise_stability(self) -> None:
         script = _load_script_module()
@@ -68,21 +69,47 @@ class GraphStabilityScriptTests(unittest.TestCase):
             ]
         )
         cache = {
-            "cases": {
-                "A": {
-                    "description": "test case",
-                    "middle": {(1, 1): 1, (1, 2): 1},
-                    "graphs": {
-                        (1, 1): {"rise": rise, "fall": fall},
-                        (1, 2): {"rise": rise, "fall": fall},
-                    },
-                }
+            "records": {
+                (1, 1, "dff", "rise"): {
+                    "weighted_adjacency": rise,
+                    "representation": "rise",
+                    "recording": "F1T1",
+                    "fish": 1,
+                    "trial": 1,
+                    "fluo_type": "dff",
+                },
+                (1, 1, "dff", "fall"): {
+                    "weighted_adjacency": fall,
+                    "representation": "fall",
+                    "recording": "F1T1",
+                    "fish": 1,
+                    "trial": 1,
+                    "fluo_type": "dff",
+                },
+                (1, 2, "dff", "rise"): {
+                    "weighted_adjacency": rise,
+                    "representation": "rise",
+                    "recording": "F1T2",
+                    "fish": 1,
+                    "trial": 2,
+                    "fluo_type": "dff",
+                },
+                (1, 2, "dff", "fall"): {
+                    "weighted_adjacency": fall,
+                    "representation": "fall",
+                    "recording": "F1T2",
+                    "fish": 1,
+                    "trial": 2,
+                    "fluo_type": "dff",
+                },
             }
         }
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            with (root / script.RISING_MOTONEURON_FILE).open("wb") as file:
+            with (root / "cgc_motoneurons_weighted_adjacency_matrices.pkl").open(
+                "wb"
+            ) as file:
                 pickle.dump(cache, file)
 
             records = script.load_graph_records(root)
@@ -102,6 +129,52 @@ class GraphStabilityScriptTests(unittest.TestCase):
         self.assertEqual(rise_stability["n_graphs"], 2)
         self.assertEqual(rise_stability["n_shape_compatible_pairs"], 1)
         self.assertAlmostEqual(rise_stability["mean_pairwise_jaccard"], 1.0)
+
+    def test_loads_lpcmci_and_oasis_artifacts_without_hindbrain_inputs(self) -> None:
+        script = _load_script_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            methods = root / "methods"
+            lpcmci = root / "lpcmci"
+            oasis = root / "oasis"
+            methods.mkdir()
+            (lpcmci / "raw_pag" / "dff" / "F1T1").mkdir(parents=True)
+            (oasis / "oasis_graphs" / "dff" / "F1T1").mkdir(parents=True)
+
+            skeleton_path = lpcmci / "raw_pag" / "dff" / "F1T1" / "rise.npz"
+            np.savez_compressed(
+                skeleton_path,
+                lossy_lagged_skeleton=np.array(
+                    [[False, True], [True, False]], dtype=bool
+                ),
+            )
+            (lpcmci / "graph_summary_rows.csv").write_text(
+                "fluo_type,recording,fish,trial,method,representation,artifact_path\n"
+                "dff,F1T1,1,1,lpcmci,rise,/foreign/computer/rise.npz\n"
+            )
+
+            oasis_path = (
+                oasis / "oasis_graphs" / "dff" / "F1T1" / "cgc__spikes.npz"
+            )
+            np.savez_compressed(
+                oasis_path,
+                retained_scores=np.array([[0.0, 0.5], [0.0, 0.0]]),
+            )
+            (oasis / "graph_summary_rows.csv").write_text(
+                "fluo_type,recording,fish,trial,method,representation,artifact_path\n"
+                "dff,F1T1,1,1,cgc,oasis_spikes,"
+                "/foreign/computer/cgc__spikes.npz\n"
+            )
+
+            records = script.load_graph_records(
+                methods,
+                lpcmci_input_dir=lpcmci,
+                oasis_input_dir=oasis,
+            )
+
+        self.assertEqual({row["method"] for row in records}, {"lpcmci", "oasis+cgc"})
+        self.assertTrue(all(row["dataset"] == "motoneurons" for row in records))
+        self.assertFalse(hasattr(script, "RISING_HINDBRAIN_FILE"))
 
 
 if __name__ == "__main__":

@@ -52,11 +52,7 @@ RUNNER_NOTEBOOKS = {
 }
 DIRECT_HEAVY_NOTEBOOKS = {
     "00_hyperparameter_timeseries_explorer.ipynb",
-    "Rising_flanks_Hindbrain.ipynb",
-    "Rising_flanks_WithSections.ipynb",
-    "c-GC-star_Hindbrain.ipynb",
     "c-GC-star_Motoneurons.ipynb",
-    "c-GC_Hindbrain.ipynb",
     "c-GC_Motoneurons.ipynb",
     "c-GC-star.ipynb",
     "c-GC.ipynb",
@@ -118,6 +114,26 @@ def _notebook_key(path: Path) -> str:
 
 
 class NotebookExecutionContractTests(unittest.TestCase):
+    def test_retired_legacy_and_hindbrain_notebooks_are_absent(self) -> None:
+        retired = (
+            "Rising_flanks_WithSections.ipynb",
+            "Rising_flanks_Hindbrain.ipynb",
+            "c-GC_Hindbrain.ipynb",
+            "c-GC-star_Hindbrain.ipynb",
+        )
+        for name in retired:
+            self.assertFalse((NOTEBOOK_ROOT / "motorneurons" / name).exists())
+
+    def test_saved_artifact_analysis_reads_method_specific_baselines(self) -> None:
+        source = "\n".join(
+            _code_cells(
+                NOTEBOOK_ROOT / "simulations" / "02_saved_artifact_analysis_run.ipynb"
+            )
+        )
+        self.assertIn("--lpcmci-input-dir", source)
+        self.assertIn("--oasis-input-dir", source)
+        self.assertNotIn("rising_flanks_weighted_adjacency_matrices.pkl", source)
+
     def test_notebooks_have_valid_json_and_compilable_code_cells(self) -> None:
         for path in _all_notebooks():
             with self.subTest(notebook=path.name):

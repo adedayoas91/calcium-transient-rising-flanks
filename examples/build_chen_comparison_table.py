@@ -15,12 +15,13 @@ import numpy as np
 from calcium_transient_rising_flank import (
     add_paired_deltas,
     graph_summary,
-    summarize_adjacency_cache,
 )
 
 DEFAULT_INPUT_DIR = Path("outputs/motorneurons")
 DEFAULT_OUTPUT_DIR = Path("outputs/chen_comparison")
 DEFAULT_CHEN_MATRIX_MANIFEST = Path("outputs/chen_direct_matrices/manifest.csv")
+DEFAULT_LPCMCI_INPUT_DIR = Path("outputs/revision_campaign/motorneurons_lpcmci")
+DEFAULT_OASIS_INPUT_DIR = Path("outputs/revision_campaign/motorneurons_oasis")
 CHEN_W_IC = 1.0
 
 MOTONEURON_SUMMARY_FILES = (
@@ -64,6 +65,17 @@ def _empty_to_none(value: Any) -> Any:
 def _int_or_none(value: Any) -> int | None:
     value = _empty_to_none(value)
     return None if value is None else int(float(value))
+
+
+def _float_or_none(value: Any) -> float | None:
+    value = _empty_to_none(value)
+    return None if value is None else float(value)
+
+
+def _normalize_numeric_fields(values: dict[str, Any]) -> None:
+    for field in NUMERIC_SUMMARY_FIELDS:
+        if field in values:
+            values[field] = _float_or_none(values[field])
 
 
 def _bool_value(value: Any) -> bool:
@@ -141,45 +153,95 @@ def _published_chen_row() -> dict[str, Any]:
     }
 
 
-def _rising_flank_rows(path: Path) -> list[dict[str, Any]]:
+def _read_csv(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    cache = _load_pickle(path)
-    rows = add_paired_deltas(summarize_adjacency_cache(cache))
-    normalized = []
-    for row in rows:
-        values = dict(row)
-        values["dataset"] = "motoneurons"
-        values["method"] = values.get("method") or "rising_flank_cgc"
-        values["method_internal"] = values["method"]
-        values["fluo_type"] = values["case"]
-        values["source_file"] = path.name
-        values["source_note"] = "case-specific rise/fall c-GC weighted cache"
-        normalized.append(values)
-    return normalized
+    with path.open(newline="") as file:
+        return [dict(row) for row in csv.DictReader(file)]
 
 
-def _full_trace_rows(path: Path, method: str) -> list[dict[str, Any]]:
+def _method_rows(path: Path, method: str) -> list[dict[str, Any]]:
+    """Normalize all representations from a method-specific c-GC cache."""
+
     if not path.exists():
         return []
     rows = _load_pickle(path)
-    normalized = []
+    normalized: list[dict[str, Any]] = []
     for row in rows:
         values = dict(row)
-        representation = values.get("representation") or "full_trace"
-        if representation not in {"full", "full_trace"}:
-            continue
+        representation = str(values.get("representation") or "full")
         values["case"] = values.get("case") or values.get("fluo_type")
-        values["description"] = values.get("description") or (
-            "full-trace baseline from saved c-GC weighted cache"
+        values["trace"] = values.get("trace") or values.get("trial")
+        values["method"] = method
+        values["method_internal"] = values.get("method_internal") or method
+        values["representation"] = (
+            "full_trace" if representation in {"full", "full_trace"} else representation
         )
-        values["method"] = values.get("method") or method
-        values["representation"] = "full_trace"
         values["graph_label"] = values.get("graph_label") or values["representation"]
+        values.setdefault("w_ic", None)
+        values.setdefault("w_rc", None)
+        values["source_file"] = path.name
+        values["source_note"] = "method-specific c-GC/c-GC* motorneuron output"
+        values["metric_semantics"] = "directed_weighted_adjacency"
+        _normalize_numeric_fields(values)
+        normalized.append(values)
+    return add_paired_deltas(normalized)
+
+
+def _lpcmci_rows(input_dir: Path | None) -> list[dict[str, Any]]:
+    if input_dir is None:
+        return []
+    path = input_dir / "graph_summary_rows.csv"
+    normalized: list[dict[str, Any]] = []
+    for row in _read_csv(path):
+        values = dict(row)
+        representation = str(values.get("representation") or "full")
+        values["case"] = values.get("case") or values.get("fluo_type")
+        values["trace"] = values.get("trace") or values.get("trial")
+        values["method"] = "lpcmci"
+        values["method_internal"] = values.get("conditional_independence_test")
+        values["representation"] = (
+            "full_trace" if representation in {"full", "full_trace"} else representation
+        )
+        values["graph_label"] = values.get("graph_label") or values["representation"]
+        values["w_ic"] = values.get("skeleton_w_ic")
+        values["w_rc"] = None
+        values["edge_density"] = values.get("skeleton_edge_density")
+        values["retained_edges"] = values.get("skeleton_retained_edges")
+        values["total_weight"] = values.get("skeleton_retained_edges")
+        values["source_file"] = str(path)
+        values["source_note"] = "LPCMCI lossy undirected lagged PAG skeleton"
+        values["metric_semantics"] = "lossy_undirected_lagged_pag_skeleton"
+        _normalize_numeric_fields(values)
+        normalized.append(values)
+    return add_paired_deltas(normalized)
+
+
+def _oasis_rows(input_dir: Path | None) -> list[dict[str, Any]]:
+    if input_dir is None:
+        return []
+    path = input_dir / "graph_summary_rows.csv"
+    normalized: list[dict[str, Any]] = []
+    for row in _read_csv(path):
+        values = dict(row)
+        downstream_method = str(values.get("method") or "unknown")
+        values["case"] = values.get("case") or values.get("fluo_type")
+        values["trace"] = values.get("trace") or values.get("trial")
+        values["method"] = f"oasis+{downstream_method}"
+        values["method_internal"] = downstream_method
+        values["graph_label"] = values.get("graph_label") or values.get(
+            "representation"
+        )
         values["delta_w_ic_rise_minus_fall"] = None
         values["delta_w_rc_rise_minus_fall"] = None
-        values["source_file"] = path.name
-        values["source_note"] = "saved full-trace motoneuron summary row"
+        values["source_file"] = str(path)
+        values["source_note"] = (
+            "OASIS preprocessing followed by the named downstream graph estimator"
+        )
+        values["metric_semantics"] = (
+            "directed_weighted_adjacency_after_oasis_preprocessing"
+        )
+        _normalize_numeric_fields(values)
         normalized.append(values)
     return normalized
 
@@ -239,16 +301,17 @@ def build_comparison_rows(
     *,
     include_published_chen: bool = True,
     chen_matrix_manifest: Path | None = DEFAULT_CHEN_MATRIX_MANIFEST,
+    lpcmci_input_dir: Path | None = None,
+    oasis_input_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if include_published_chen:
         rows.append(_published_chen_row())
     rows.extend(_chen_direct_matrix_rows(chen_matrix_manifest))
-    rows.extend(
-        _rising_flank_rows(input_dir / "rising_flanks_weighted_adjacency_matrices.pkl")
-    )
     for method, filename in MOTONEURON_SUMMARY_FILES:
-        rows.extend(_full_trace_rows(input_dir / filename, method))
+        rows.extend(_method_rows(input_dir / filename, method))
+    rows.extend(_lpcmci_rows(lpcmci_input_dir))
+    rows.extend(_oasis_rows(oasis_input_dir))
     return rows
 
 
@@ -306,6 +369,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
+        "--lpcmci-input-dir", type=Path, default=DEFAULT_LPCMCI_INPUT_DIR
+    )
+    parser.add_argument("--oasis-input-dir", type=Path, default=DEFAULT_OASIS_INPUT_DIR)
+    parser.add_argument(
         "--omit-published-chen",
         action="store_true",
         help="omit the literature W_IC=1.00 reference row",
@@ -328,6 +395,8 @@ def main() -> None:
         args.input_dir,
         include_published_chen=not args.omit_published_chen,
         chen_matrix_manifest=args.chen_matrix_manifest,
+        lpcmci_input_dir=args.lpcmci_input_dir,
+        oasis_input_dir=args.oasis_input_dir,
     )
     if not rows:
         raise SystemExit(f"no comparison rows found under {args.input_dir}")
@@ -339,6 +408,8 @@ def main() -> None:
         json.dump(
             {
                 "input_dir": str(args.input_dir),
+                "lpcmci_input_dir": str(args.lpcmci_input_dir),
+                "oasis_input_dir": str(args.oasis_input_dir),
                 "n_rows": len(rows),
                 "n_summary_rows": len(aggregates),
                 "includes_published_chen": not args.omit_published_chen,

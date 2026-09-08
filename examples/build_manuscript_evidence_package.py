@@ -229,8 +229,12 @@ def build_chen_interpretation_rows(rows: list[dict[str, Any]]) -> list[dict[str,
             "published",
             "published_direct",
             "full_trace",
+            "deconvolved",
             "rise",
             "fall",
+            "fall_residual",
+            "oasis_spikes",
+            "oasis_denoised",
         }:
             continue
         if method not in {
@@ -239,7 +243,9 @@ def build_chen_interpretation_rows(rows: list[dict[str, Any]]) -> list[dict[str,
             "chen_mvgc",
             "cgc",
             "cgc-star",
-            "rising_flank_cgc",
+            "lpcmci",
+            "oasis+cgc",
+            "oasis+cgc-star",
         }:
             continue
         if row.get("dataset") != "motoneurons":
@@ -247,12 +253,20 @@ def build_chen_interpretation_rows(rows: list[dict[str, Any]]) -> list[dict[str,
         role = "published comparator"
         if representation == "published_direct":
             role = "direct Chen BVGC/MVGC matrix reproduction"
+        elif method == "lpcmci":
+            role = "lossy undirected lagged PAG-skeleton baseline"
+        elif str(method).startswith("oasis+"):
+            role = "OASIS preprocessing with named downstream graph estimator"
         elif representation == "full_trace":
-            role = "full-trace c-GC/c-GC* baseline"
+            role = "full-trace method baseline"
+        elif representation == "deconvolved":
+            role = "deconvolved-trace comparator"
         elif representation == "rise":
             role = "primary rising-flank candidate"
         elif representation == "fall":
             role = "falling-flank negative comparator"
+        elif representation == "fall_residual":
+            role = "falling-residual negative comparator"
         selected.append(
             {
                 "method": method,
@@ -493,7 +507,15 @@ def build_graph_support_interpretation_rows(
     for row in rows:
         dataset = row.get("dataset")
         representation = row.get("representation")
-        if representation not in {"rise", "fall", "full_trace"}:
+        if representation not in {
+            "full_trace",
+            "deconvolved",
+            "rise",
+            "fall",
+            "fall_residual",
+            "oasis_spikes",
+            "oasis_denoised",
+        }:
             continue
         selected.append(
             {
@@ -747,11 +769,11 @@ def build_figure_manifest(
             ),
         },
         {
-            "figure": "hindbrain_descriptive_extension",
+            "figure": "motoneuron_method_graph_support",
             "status": "available_from_saved_tables",
             "source_artifacts": "graph_stability/graph_stability_summary.csv",
             "draft_output": "graph_support_summary.png",
-            "next_step": "use as descriptive supplement unless anatomical partitions are defined",
+            "next_step": "compare graph support across motorneuron method outputs",
         },
     ]
 
@@ -773,10 +795,6 @@ def _tradeoff_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
         key = str(row["tradeoff_class"])
         counts[key] = counts.get(key, 0) + 1
     return counts
-
-
-def _hindbrain_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [row for row in rows if row["dataset"] == "hindbrain"]
 
 
 def build_markdown_report(
@@ -804,7 +822,9 @@ def build_markdown_report(
     ]
     rise_rows = [row for row in chen_rows if row["representation"] == "rise"]
     fall_rows = [row for row in chen_rows if row["representation"] == "fall"]
-    hindbrain_rows = _hindbrain_rows(graph_rows)
+    motoneuron_graph_rows = [
+        row for row in graph_rows if row["dataset"] == "motoneurons"
+    ]
     null_nominal = [
         row
         for row in empirical_null_rows
@@ -918,22 +938,15 @@ def build_markdown_report(
             "- No empirical re-estimation stability rows are available in the "
             "evidence package yet."
         )
-    lines.extend(["", "## Hindbrain Descriptive Extension", ""])
-    if hindbrain_rows:
-        lines.append(f"- Hindbrain graph-support rows available: {len(hindbrain_rows)}.")
-        lines.append(
-            "- Report edge density, retained edges, and total retained weight only; "
-            "do not report W_IC or W_RC without a declared anatomical partition."
-        )
-        for row in hindbrain_rows:
-            lines.append(
-                f"- {row['case']} {row['method']} {row['representation']}: "
-                f"edge density {_format_float(_float_or_none(row['edge_density_mean']))}, "
-                f"retained edges {_format_float(_float_or_none(row['retained_edges_mean']), 1)}, "
-                f"total weight {_format_float(_float_or_none(row['total_weight_mean']))}."
-            )
-    else:
-        lines.append("- No hindbrain graph-support rows are available.")
+    lines.extend(["", "## Motorneuron Method Graph Support", ""])
+    lines.append(
+        f"- Method-specific graph-support rows available: "
+        f"{len(motoneuron_graph_rows)}."
+    )
+    lines.append(
+        "- LPCMCI values summarize a lossy undirected lagged PAG skeleton; "
+        "they are not directed-weight equivalents of c-GC/c-GC*."
+    )
     lines.extend(["", "## Figure Manifest", ""])
     for figure in figures:
         lines.append(
@@ -1157,9 +1170,9 @@ def build_final_figure_plan(
             ),
         ),
         _plan_row(
-            figure_id="fig_hindbrain_descriptive_extension",
-            manuscript_role="descriptive hindbrain extension panel",
-            manifest_row=_figure_by_name(figures, "hindbrain_descriptive_extension"),
+            figure_id="fig_motoneuron_method_graph_support",
+            manuscript_role="motorneuron method graph-support panel",
+            manifest_row=_figure_by_name(figures, "motoneuron_method_graph_support"),
             available_outputs=available_outputs,
             fallback_next_step="regenerate graph support summary",
         ),
@@ -1202,31 +1215,35 @@ def _plot_empirical_metric_summary(
     paired = [
         row
         for row in rows
-        if row["method"] == "rising_flank_cgc"
+        if row["method"] in {"cgc", "cgc-star", "lpcmci"}
         and row["representation"] in {"rise", "fall"}
     ]
     if not paired:
         return False
-    cases = sorted({str(row["case"]) for row in paired})
+    groups = sorted({(str(row["method"]), str(row["case"])) for row in paired})
+    group_labels = [f"{method}\n{case}" for method, case in groups]
     metrics = ("w_ic_mean", "w_rc_mean", "edge_density_mean")
     labels = ("W_IC", "W_RC", "Edge density")
     fig, axes = plt.subplots(1, len(metrics), figsize=(10, 3.2), constrained_layout=True)
     for axis, metric, label in zip(axes, metrics, labels, strict=True):
         for representation, marker in (("rise", "o"), ("fall", "s")):
             values = []
-            for case in cases:
+            for method, case in groups:
                 match = next(
                     (
                         row
                         for row in paired
-                        if row["case"] == case and row["representation"] == representation
+                        if str(row["method"]) == method
+                        and str(row["case"]) == case
+                        and row["representation"] == representation
                     ),
                     None,
                 )
                 values.append(_float_or_none(None if match is None else match[metric]))
-            axis.plot(cases, values, marker=marker, label=representation)
+            axis.plot(group_labels, values, marker=marker, label=representation)
         axis.set_title(label)
-        axis.set_xlabel("Case")
+        axis.set_xlabel("Method / fluorescence")
+        axis.tick_params(axis="x", labelrotation=35, labelsize=7)
     axes[0].legend(frameon=False)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
@@ -1338,7 +1355,7 @@ def _bar_labels(rows: list[dict[str, Any]]) -> list[str]:
         elif representation == "full_trace":
             labels.append(f"{method}\n{case}")
         else:
-            labels.append(f"{case}\n{representation}")
+            labels.append(f"{method}\n{case} {representation}")
     return labels
 
 
@@ -1352,7 +1369,17 @@ def _plot_chen_comparison(rows: list[dict[str, Any]], output_path: Path) -> bool
         row
         for row in rows
         if row["representation"]
-        in {"published", "published_direct", "full_trace", "rise", "fall"}
+        in {
+            "published",
+            "published_direct",
+            "full_trace",
+            "deconvolved",
+            "rise",
+            "fall",
+            "fall_residual",
+            "oasis_spikes",
+            "oasis_denoised",
+        }
     ]
     if not plotted:
         return False
@@ -1363,8 +1390,12 @@ def _plot_chen_comparison(rows: list[dict[str, Any]], output_path: Path) -> bool
         "published": "#555555",
         "published_direct": "#777777",
         "full_trace": "#4c78a8",
+        "deconvolved": "#72b7b2",
         "rise": "#2f855a",
         "fall": "#c05621",
+        "fall_residual": "#f2cf5b",
+        "oasis_spikes": "#b279a2",
+        "oasis_denoised": "#ff9da6",
     }
     fig, axes = plt.subplots(2, 1, figsize=(9, 5.6), constrained_layout=True)
     for axis, (metric, label) in zip(axes, metrics, strict=True):
@@ -1394,59 +1425,27 @@ def _plot_graph_support(rows: list[dict[str, Any]], output_path: Path) -> bool:
     except Exception:
         return False
 
-    motoneuron = [
-        row
-        for row in rows
-        if row["dataset"] == "motoneurons"
-        and row["method"] == "rising_flank_cgc"
-        and row["representation"] in {"rise", "fall"}
-    ]
-    hindbrain = [
-        row
-        for row in rows
-        if row["dataset"] == "hindbrain"
-        and row["representation"] in {"rise", "fall", "full_trace"}
-    ]
-    if not motoneuron and not hindbrain:
+    motoneuron = [row for row in rows if row["dataset"] == "motoneurons"]
+    if not motoneuron:
         return False
 
-    fig, axes = plt.subplots(1, 2, figsize=(9, 3.6), constrained_layout=True)
-    if motoneuron:
-        cases = sorted({str(row["case"]) for row in motoneuron})
-        for representation, marker in (("rise", "o"), ("fall", "s")):
-            values = []
-            for case in cases:
-                match = next(
-                    (
-                        row
-                        for row in motoneuron
-                        if row["case"] == case and row["representation"] == representation
-                    ),
-                    None,
-                )
-                values.append(
-                    _float_or_none(None if match is None else match["edge_density_mean"])
-                )
-            axes[0].plot(cases, values, marker=marker, label=representation)
-        axes[0].set_title("Motoneuron support")
-        axes[0].set_ylabel("Edge density")
-        axes[0].set_xlabel("Case")
-        axes[0].legend(frameon=False)
-    else:
-        axes[0].axis("off")
-
-    if hindbrain:
-        labels = [
-            f"{row['method']}\n{row['representation']}"
-            for row in hindbrain
-        ]
-        values = [_float_or_none(row["edge_density_mean"]) or 0.0 for row in hindbrain]
-        axes[1].bar(range(len(hindbrain)), values, color="#4c78a8")
-        axes[1].set_xticks(range(len(hindbrain)), labels, rotation=35, ha="right", fontsize=7)
-        axes[1].set_title("Hindbrain descriptive support")
-        axes[1].set_ylabel("Edge density")
-    else:
-        axes[1].axis("off")
+    labels = [
+        f"{row['method']}\n{row['case']} {row['representation']}"
+        for row in motoneuron
+    ]
+    values = [
+        _float_or_none(row.get("edge_density_mean")) or 0.0 for row in motoneuron
+    ]
+    fig, axis = plt.subplots(
+        figsize=(max(7.0, 0.48 * len(motoneuron)), 3.8),
+        constrained_layout=True,
+    )
+    axis.bar(range(len(motoneuron)), values, color="#4c78a8")
+    axis.set_xticks(
+        range(len(motoneuron)), labels, rotation=45, ha="right", fontsize=7
+    )
+    axis.set_title("Motorneuron graph support by method and representation")
+    axis.set_ylabel("Edge density")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
     plt.close(fig)
@@ -1766,7 +1765,6 @@ def build_package(
         "n_synthetic_tradeoff_rows": len(synthetic_rows),
         "n_dynamic_a_interpretation_rows": len(dynamic_rows),
         "n_graph_support_rows": len(graph_rows),
-        "n_hindbrain_graph_support_rows": len(_hindbrain_rows(graph_rows)),
         "n_empirical_null_interpretation_rows": len(empirical_null_rows),
         "n_empirical_stability_interpretation_rows": len(empirical_stability_rows),
         "n_ready_final_figure_panels": sum(

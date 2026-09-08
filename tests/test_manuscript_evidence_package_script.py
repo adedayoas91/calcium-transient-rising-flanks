@@ -58,9 +58,9 @@ class ManuscriptEvidencePackageScriptTests(unittest.TestCase):
                         "delta_w_rc_rise_minus_fall_mean",
                         "motoneurons,chen_improved_gc,published,,published,"
                         "published aggregate,1.0,,,,,,",
-                        "motoneurons,rising_flank_cgc,A,A,rise,F1;F2,"
+                        "motoneurons,cgc,dff,dff,rise,F1;F2,"
                         "0.9,0.6,0.2,10,4.0,0.4,0.3",
-                        "motoneurons,rising_flank_cgc,A,A,fall,F1;F2,"
+                        "motoneurons,cgc,dff,dff,fall,F1;F2,"
                         "0.5,0.3,0.1,5,2.0,0.4,0.3",
                         "motoneurons,cgc,dff,dff,full_trace,F1;F2,"
                         "0.8,0.5,0.3,12,5.0,,",
@@ -87,7 +87,7 @@ class ManuscriptEvidencePackageScriptTests(unittest.TestCase):
                     [
                         "case,method,metric,n_pairs,mean_delta,median_delta,"
                         "n_positive,n_negative,p_two_sided_signflip",
-                        "A,rising_flank_cgc,w_ic,2,0.4,0.4,2,0,0.5",
+                        "dff,cgc,w_ic,2,0.4,0.4,2,0,0.5",
                     ]
                 )
                 + "\n"
@@ -98,8 +98,7 @@ class ManuscriptEvidencePackageScriptTests(unittest.TestCase):
                     [
                         "dataset,case,method,representation,n_graphs,"
                         "edge_density_mean,retained_edges_mean,total_weight_mean",
-                        "motoneurons,A,rising_flank_cgc,rise,2,0.2,10,4.0",
-                        "hindbrain,medial,rising_flank_cgc,rise,1,0.16,63,9.8",
+                        "motoneurons,dff,cgc,rise,2,0.2,10,4.0",
                     ]
                 )
                 + "\n"
@@ -147,18 +146,18 @@ class ManuscriptEvidencePackageScriptTests(unittest.TestCase):
         self.assertEqual(summary["n_empirical_pairing_rows"], 1)
         self.assertEqual(summary["n_synthetic_tradeoff_rows"], 1)
         self.assertEqual(summary["n_dynamic_a_interpretation_rows"], 0)
-        self.assertEqual(summary["n_hindbrain_graph_support_rows"], 1)
+        self.assertNotIn("n_hindbrain_graph_support_rows", summary)
         self.assertEqual(summary["n_empirical_null_interpretation_rows"], 0)
         self.assertEqual(summary["n_empirical_stability_interpretation_rows"], 0)
         self.assertEqual(summary["n_missing_publication_gates"], 1)
         self.assertIn("Do not promote the empirical superiority claim yet", report)
-        self.assertIn("Hindbrain Descriptive Extension", report)
-        self.assertIn("do not report W_IC or W_RC", report)
+        self.assertNotIn("Hindbrain", report)
         self.assertIn("Final empirical superiority claims therefore remain gated", snippet)
         self.assertIn("representative\\_network\\_case\\_c.png", snippet)
         self.assertIn("Final figure assembly", figure_layout)
         self.assertIn("fig_representative_network_case_c", final_plan)
         self.assertIn("fig_dynamic_a_locked", final_plan)
+        self.assertNotIn("fig_hindbrain", final_plan)
         self.assertIn("missing_user_run", final_plan)
         self.assertTrue(figure_manifest_exists)
         self.assertIn("chen_comparison_summary.png", figure_outputs)

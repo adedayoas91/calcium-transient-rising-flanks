@@ -15,21 +15,14 @@ import numpy as np
 
 DEFAULT_INPUT_DIR = Path("outputs/motorneurons")
 DEFAULT_OUTPUT_DIR = Path("outputs/graph_stability")
+DEFAULT_LPCMCI_INPUT_DIR = Path("outputs/revision_campaign/motorneurons_lpcmci")
+DEFAULT_OASIS_INPUT_DIR = Path("outputs/revision_campaign/motorneurons_oasis")
 
-RISING_MOTONEURON_FILE = "rising_flanks_weighted_adjacency_matrices.pkl"
-RISING_HINDBRAIN_FILE = "rising_flanks_hindbrain_medial_weighted_adjacency_matrices.pkl"
-FULL_TRACE_FILES = (
-    ("motoneurons", "cgc", "cgc_motoneurons_weighted_adjacency_matrices.pkl"),
+METHOD_CACHE_FILES = (
+    ("cgc", "cgc_motoneurons_weighted_adjacency_matrices.pkl"),
     (
-        "motoneurons",
         "cgc-star",
         "cgc_star_motoneurons_weighted_adjacency_matrices.pkl",
-    ),
-    ("hindbrain", "cgc", "cgc_hindbrain_medial_weighted_adjacency_matrix.pkl"),
-    (
-        "hindbrain",
-        "cgc-star",
-        "cgc_star_hindbrain_medial_weighted_adjacency_matrix.pkl",
     ),
 )
 
@@ -121,39 +114,9 @@ def _record(
     }
 
 
-def _load_rising_motoneuron_records(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    cache = _load_pickle(path)
-    records: list[dict[str, Any]] = []
-    for case_label, case in cache.get("cases", {}).items():
-        for key, graphs in case["graphs"].items():
-            fish, trace = key
-            for representation, payload in graphs.items():
-                records.append(
-                    _record(
-                        matrix=_matrix(payload),
-                        dataset="motoneurons",
-                        method="rising_flank_cgc",
-                        representation=str(representation),
-                        source_file=path.name,
-                        case=case_label,
-                        description=case.get("description"),
-                        fluo_type=case_label,
-                        subset=None,
-                        recording=f"F{fish}T{trace}",
-                        fish=fish,
-                        trial=None,
-                        trace=trace,
-                        binary=False,
-                    )
-                )
-    return records
+def _load_method_records(path: Path, method: str) -> list[dict[str, Any]]:
+    """Load every representation from a method-specific c-GC cache."""
 
-
-def _load_full_trace_records(
-    path: Path, dataset: str, method: str
-) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     payload = _load_pickle(path)
@@ -165,16 +128,16 @@ def _load_full_trace_records(
 
     records: list[dict[str, Any]] = []
     for raw in raw_records.values():
-        representation = raw.get("representation") or "full_trace"
-        if representation not in {"full", "full_trace"}:
-            continue
+        representation = str(raw.get("representation") or "full")
+        if representation == "full":
+            representation = "full_trace"
         fluo_type = raw.get("fluo_type")
         records.append(
             _record(
                 matrix=_matrix(raw),
-                dataset=dataset,
+                dataset="motoneurons",
                 method=method,
-                representation="full_trace",
+                representation=representation,
                 source_file=path.name,
                 case=raw.get("case") or fluo_type,
                 description=raw.get("description"),
@@ -183,49 +146,113 @@ def _load_full_trace_records(
                 recording=raw.get("recording"),
                 fish=raw.get("fish"),
                 trial=raw.get("trial"),
-                trace=raw.get("trace"),
-                binary=None,
+                trace=raw.get("trace") or raw.get("trial"),
+                binary=False,
                 method_internal=raw.get("method_internal"),
+                metric_semantics="directed_weighted_adjacency",
             )
         )
     return records
 
 
-def _load_rising_hindbrain_records(path: Path) -> list[dict[str, Any]]:
+def _read_csv(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    payload = _load_pickle(path)
-    raw = payload["record"]
+    with path.open(newline="") as file:
+        return [dict(row) for row in csv.DictReader(file)]
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    return int(float(value))
+
+
+def _resolve_artifact_path(input_dir: Path, value: Any) -> Path:
+    """Resolve saved artifact paths after moving outputs between computers."""
+
+    raw = Path(str(value))
+    if raw.is_file():
+        return raw
+    direct = input_dir / raw
+    if direct.is_file():
+        return direct
+    matches = list(input_dir.rglob(raw.name))
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise FileNotFoundError(f"saved graph artifact does not exist: {raw}")
+    raise ValueError(f"ambiguous saved graph artifact name under {input_dir}: {raw.name}")
+
+
+def _load_npz_records(
+    input_dir: Path | None,
+    *,
+    matrix_key: str,
+    method_from_row: Any,
+    binary: bool,
+    metric_semantics: str,
+) -> list[dict[str, Any]]:
+    if input_dir is None:
+        return []
     records: list[dict[str, Any]] = []
-    for representation, graph in raw["graphs"].items():
+    for raw in _read_csv(input_dir / "graph_summary_rows.csv"):
+        artifact = _resolve_artifact_path(input_dir, raw.get("artifact_path"))
+        with np.load(artifact, allow_pickle=False) as payload:
+            matrix = np.asarray(payload[matrix_key], dtype=float)
+        fluo_type = raw.get("fluo_type")
         records.append(
             _record(
-                matrix=_matrix(graph),
-                dataset="hindbrain",
-                method="rising_flank_cgc",
-                representation=str(representation),
-                source_file=path.name,
-                case=None,
-                description=None,
-                fluo_type=None,
+                matrix=matrix,
+                dataset="motoneurons",
+                method=method_from_row(raw),
+                representation=str(raw.get("representation") or "unknown"),
+                source_file=str(artifact),
+                case=raw.get("case") or fluo_type,
+                description=raw.get("output_semantics"),
+                fluo_type=fluo_type,
                 subset=raw.get("subset"),
                 recording=raw.get("recording"),
-                fish=None,
-                trial=None,
-                trace=None,
-                binary=False,
+                fish=_int_or_none(raw.get("fish")),
+                trial=_int_or_none(raw.get("trial")),
+                trace=_int_or_none(raw.get("trial")),
+                binary=binary,
+                method_internal=raw.get("method"),
+                metric_semantics=metric_semantics,
             )
         )
     return records
 
 
-def load_graph_records(input_dir: Path) -> list[dict[str, Any]]:
+def load_graph_records(
+    input_dir: Path,
+    *,
+    lpcmci_input_dir: Path | None = None,
+    oasis_input_dir: Path | None = None,
+) -> list[dict[str, Any]]:
     """Load all supported saved weighted-adjacency artifacts."""
 
-    records = _load_rising_motoneuron_records(input_dir / RISING_MOTONEURON_FILE)
-    records.extend(_load_rising_hindbrain_records(input_dir / RISING_HINDBRAIN_FILE))
-    for dataset, method, filename in FULL_TRACE_FILES:
-        records.extend(_load_full_trace_records(input_dir / filename, dataset, method))
+    records: list[dict[str, Any]] = []
+    for method, filename in METHOD_CACHE_FILES:
+        records.extend(_load_method_records(input_dir / filename, method))
+    records.extend(
+        _load_npz_records(
+            lpcmci_input_dir,
+            matrix_key="lossy_lagged_skeleton",
+            method_from_row=lambda row: "lpcmci",
+            binary=True,
+            metric_semantics="lossy_undirected_lagged_pag_skeleton",
+        )
+    )
+    records.extend(
+        _load_npz_records(
+            oasis_input_dir,
+            matrix_key="retained_scores",
+            method_from_row=lambda row: f"oasis+{row.get('method') or 'unknown'}",
+            binary=False,
+            metric_semantics="directed_weighted_adjacency_after_oasis_preprocessing",
+        )
+    )
     return records
 
 
@@ -382,12 +409,20 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--lpcmci-input-dir", type=Path, default=DEFAULT_LPCMCI_INPUT_DIR
+    )
+    parser.add_argument("--oasis-input-dir", type=Path, default=DEFAULT_OASIS_INPUT_DIR)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    records = load_graph_records(args.input_dir)
+    records = load_graph_records(
+        args.input_dir,
+        lpcmci_input_dir=args.lpcmci_input_dir,
+        oasis_input_dir=args.oasis_input_dir,
+    )
     if not records:
         raise SystemExit(f"no graph artifacts found under {args.input_dir}")
     overlaps = build_pairwise_overlaps(records)
@@ -401,6 +436,8 @@ def main() -> None:
         json.dump(
             {
                 "input_dir": str(args.input_dir),
+                "lpcmci_input_dir": str(args.lpcmci_input_dir),
+                "oasis_input_dir": str(args.oasis_input_dir),
                 "n_graph_rows": len(records),
                 "n_overlap_rows": len(overlaps),
                 "n_stability_rows": len(stability),

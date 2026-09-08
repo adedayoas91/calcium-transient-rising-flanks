@@ -20,43 +20,15 @@ def _load_script_module():
 
 
 class ChenComparisonTableScriptTests(unittest.TestCase):
-    def test_builds_published_rise_fall_and_full_trace_rows(self) -> None:
+    def test_builds_rows_from_all_method_specific_motorneuron_outputs(self) -> None:
         script = _load_script_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            rising_cache = {
-                "cases": {
-                    "A": {
-                        "description": "raw test case",
-                        "middle": {(1, 1): 2},
-                        "graphs": {
-                            (1, 1): {
-                                "rise": np.array(
-                                    [
-                                        [0.0, 1.0, 0.0, 0.0],
-                                        [0.0, 0.0, 0.0, 0.0],
-                                        [0.0, 0.0, 0.0, 1.0],
-                                        [0.0, 0.0, 0.0, 0.0],
-                                    ]
-                                ),
-                                "fall": np.array(
-                                    [
-                                        [0.0, 0.0, 1.0, 0.0],
-                                        [0.0, 0.0, 0.0, 0.0],
-                                        [1.0, 0.0, 0.0, 0.0],
-                                        [0.0, 0.0, 0.0, 0.0],
-                                    ]
-                                ),
-                            }
-                        },
-                    }
-                }
-            }
-            with (root / "rising_flanks_weighted_adjacency_matrices.pkl").open(
-                "wb"
-            ) as file:
-                pickle.dump(rising_cache, file)
-            full_rows = [
+            lpcmci = root / "lpcmci"
+            oasis = root / "oasis"
+            lpcmci.mkdir()
+            oasis.mkdir()
+            cgc_rows = [
                 {
                     "dataset": "motoneurons",
                     "recording": "F1T1",
@@ -90,23 +62,81 @@ class ChenComparisonTableScriptTests(unittest.TestCase):
                     "retained_edges": 1,
                     "edge_opportunities": 2,
                     "total_weight": 0.5,
-                }
+                },
+                {
+                    "dataset": "motoneurons",
+                    "recording": "F1T1",
+                    "fish": 1,
+                    "trial": 1,
+                    "fluo_type": "dff",
+                    "method": "cgc",
+                    "representation": "rise",
+                    "w_ic": 0.9,
+                    "w_rc": 0.7,
+                    "edge_density": 0.4,
+                    "retained_edges": 4,
+                    "total_weight": 3.0,
+                },
+                {
+                    "dataset": "motoneurons",
+                    "recording": "F1T1",
+                    "fish": 1,
+                    "trial": 1,
+                    "fluo_type": "dff",
+                    "method": "cgc",
+                    "representation": "fall",
+                    "w_ic": 0.4,
+                    "w_rc": 0.2,
+                    "edge_density": 0.2,
+                    "retained_edges": 2,
+                    "total_weight": 1.0,
+                },
             ]
             with (root / "cgc_motoneurons_summary_rows.pkl").open("wb") as file:
-                pickle.dump(full_rows, file)
+                pickle.dump(cgc_rows, file)
+            with (root / "cgc_star_motoneurons_summary_rows.pkl").open("wb") as file:
+                pickle.dump([{**cgc_rows[0], "method": "cgc-star"}], file)
+            (lpcmci / "graph_summary_rows.csv").write_text(
+                "fluo_type,recording,fish,trial,method,representation,"
+                "skeleton_w_ic,skeleton_edge_density,skeleton_retained_edges\n"
+                "dff,F1T1,1,1,lpcmci,rise,0.8,0.3,3\n"
+                "dff,F1T1,1,1,lpcmci,fall,0.3,0.2,2\n"
+            )
+            (oasis / "graph_summary_rows.csv").write_text(
+                "fluo_type,recording,fish,trial,method,representation,w_ic,w_rc,"
+                "edge_density,retained_edges,total_weight\n"
+                "dff,F1T1,1,1,cgc,oasis_spikes,0.7,0.6,0.2,2,1.5\n"
+                "dff,F1T1,1,1,cgc-star,oasis_spikes,0.6,0.5,0.2,2,1.4\n"
+            )
 
-            rows = script.build_comparison_rows(root)
+            rows = script.build_comparison_rows(
+                root,
+                lpcmci_input_dir=lpcmci,
+                oasis_input_dir=oasis,
+            )
             aggregates = script.aggregate_rows(rows)
 
         methods = {row["method"] for row in rows}
         self.assertIn("chen_improved_gc", methods)
-        self.assertIn("rising_flank_cgc", methods)
         self.assertIn("cgc", methods)
+        self.assertIn("cgc-star", methods)
+        self.assertIn("lpcmci", methods)
+        self.assertIn("oasis+cgc", methods)
+        self.assertIn("oasis+cgc-star", methods)
+        self.assertNotIn("rising_flank_cgc", methods)
         cgc_rows = [row for row in rows if row["method"] == "cgc"]
-        self.assertEqual(len(cgc_rows), 1)
+        self.assertEqual(len(cgc_rows), 4)
         self.assertEqual(cgc_rows[0]["representation"], "full_trace")
-        rise = next(row for row in rows if row.get("representation") == "rise")
-        fall = next(row for row in rows if row.get("representation") == "fall")
+        rise = next(
+            row
+            for row in rows
+            if row["method"] == "cgc" and row.get("representation") == "rise"
+        )
+        fall = next(
+            row
+            for row in rows
+            if row["method"] == "cgc" and row.get("representation") == "fall"
+        )
         self.assertGreater(rise["delta_w_ic_rise_minus_fall"], 0.0)
         self.assertGreater(fall["delta_w_ic_rise_minus_fall"], 0.0)
         self.assertTrue(any(row["method"] == "cgc" for row in aggregates))

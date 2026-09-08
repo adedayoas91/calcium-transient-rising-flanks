@@ -27,15 +27,15 @@ class EmpiricalPairingScriptTests(unittest.TestCase):
                         "dataset,method,method_internal,case,fluo_type,binary,"
                         "recording,fish,trial,trace,description,representation,"
                         "w_ic,w_rc,edge_density,retained_edges,total_weight",
-                        "motoneurons,rising_flank_cgc,rising_flank_cgc,A,A,"
+                        "motoneurons,cgc,cgc,dff,dff,"
                         "False,F1T1,1,1,,raw,rise,0.9,0.8,0.3,6,2.0",
-                        "motoneurons,rising_flank_cgc,rising_flank_cgc,A,A,"
+                        "motoneurons,cgc,cgc,dff,dff,"
                         "False,F1T1,1,1,,raw,fall,0.4,0.2,0.2,4,1.0",
-                        "motoneurons,rising_flank_cgc,rising_flank_cgc,A,A,"
+                        "motoneurons,cgc,cgc,dff,dff,"
                         "False,F1T2,1,2,,raw,rise,0.8,,0.4,8,3.0",
-                        "motoneurons,rising_flank_cgc,rising_flank_cgc,A,A,"
+                        "motoneurons,cgc,cgc,dff,dff,"
                         "False,F1T2,1,2,,raw,fall,0.6,,0.1,2,1.5",
-                        "motoneurons,cgc,cgc,A,A,,F1T1,1,1,,raw,full_trace,"
+                        "motoneurons,cgc-star,cgc-star,dff,dff,,F1T1,1,1,,raw,full_trace,"
                         "0.7,0.6,0.3,5,2.0",
                     ]
                 )
@@ -49,12 +49,12 @@ class EmpiricalPairingScriptTests(unittest.TestCase):
         w_ic_deltas = [
             row
             for row in deltas
-            if row["metric"] == "w_ic" and row["case"] == "A"
+            if row["metric"] == "w_ic" and row["case"] == "dff"
         ]
         w_rc_deltas = [
             row
             for row in deltas
-            if row["metric"] == "w_rc" and row["case"] == "A"
+            if row["metric"] == "w_rc" and row["case"] == "dff"
         ]
         self.assertEqual(len(w_ic_deltas), 2)
         self.assertEqual(len(w_rc_deltas), 1)

@@ -252,9 +252,8 @@ metadata and in an execution-contract cell:
 | Temporal-resolvability map | Regime × native delay × seed |
 | Motoneuron temporal screen | Case × recording |
 | Publication-gate pipeline | Resumable dynamic/null/stability units plus status-validated completed stages |
-| Saved-artifact analysis | Valid completed `summary.json` per derived-analysis stage |
-| Legacy motoneuron/hindbrain c-GC and c-GC* notebooks | Atomic per-recording estimator input cache |
-| Legacy empirical rise/fall notebooks | BH-FDR physical-event case/recording/phase cache; hindbrain uses phase-level units |
+| Saved-artifact analysis | Rebuilt from the current method-specific saved outputs |
+| Motoneuron c-GC and c-GC* notebooks | Atomic per-recording estimator input cache |
 | Static c-GC/c-GC* simulation notebooks | Atomic per-estimator-input cache shared across grids, nulls, and sweeps |
 | Dynamic hyperparameter explorer | Atomic per-simulation-input cache |
 
@@ -354,16 +353,14 @@ Set `TAU` and `N_PASTS` in the parameter cell before running. When `TAU` is set,
 
 ## 3. Empirical Graph Artifacts
 
-7. `notebooks/motorneurons/Rising_flanks_WithSections.ipynb`
-8. `notebooks/motorneurons/Rising_flanks_Hindbrain.ipynb`
-9. `notebooks/motorneurons/c-GC_Motoneurons.ipynb`
-10. `notebooks/motorneurons/c-GC-star_Motoneurons.ipynb`
-11. `notebooks/motorneurons/c-GC_Hindbrain.ipynb`
-12. `notebooks/motorneurons/c-GC-star_Hindbrain.ipynb`
-13. `notebooks/motorneurons/lpcmci.ipynb`
-14. `notebooks/motorneurons/oasis.ipynb`
+7. `notebooks/motorneurons/c-GC_Motoneurons.ipynb`
+8. `notebooks/motorneurons/c-GC-star_Motoneurons.ipynb`
+9. `notebooks/motorneurons/lpcmci.ipynb`
+10. `notebooks/motorneurons/oasis.ipynb`
 
-Run these only when the saved graph pickle artifacts under `outputs/motorneurons/` need to be rebuilt.
+These four method-specific notebooks are the complete empirical graph-artifact
+path. The retired combined c-GC notebook and the removed hindbrain notebooks
+are not prerequisites.
 
 The two motoneuron c-GC notebooks use the same six inputs as LPCMCI: `dff` and
 `f_smooth` for F3T1, F3T2, and F5T2. Each input is fit in the same five
@@ -380,7 +377,7 @@ ground truth is unavailable.
 
 ## 4. Saved-Artifact Summaries
 
-15. `notebooks/simulations/02_saved_artifact_analysis_run.ipynb`
+11. `notebooks/simulations/02_saved_artifact_analysis_run.ipynb`
 
 This wraps the scripts that summarize already-generated artifacts:
 
@@ -392,9 +389,13 @@ This wraps the scripts that summarize already-generated artifacts:
 - `examples/build_manuscript_evidence_package.py`
 - `examples/build_todo_completion_audit.py`
 
+The comparison and graph-stability stages read all four method-specific output
+roots. The notebook rebuilds these inexpensive derived analyses by default so
+an older completed summary cannot hide newly generated baseline results.
+
 ## 5. Publication-Gate Runs
 
-16. `notebooks/simulations/03_publication_gate_pipeline_run.ipynb`
+12. `notebooks/simulations/03_publication_gate_pipeline_run.ipynb`
 
 This wraps `examples/run_publication_gate_pipeline.py` for the heavier user-run gates:
 
@@ -418,8 +419,8 @@ Set `DYNAMIC_TAU`, `DYNAMIC_N_PASTS`, `MIN_RISE_RUN_SAMPLES`, and the `RISE_MATC
 
 ## 6. Three-State Temporal-Prior Follow-Up
 
-17. `notebooks/simulations/04_temporal_resolvability_map.ipynb`
-18. `notebooks/motorneurons/Temporal_resolvability_screen.ipynb`
+13. `notebooks/simulations/04_temporal_resolvability_map.ipynb`
+14. `notebooks/motorneurons/Temporal_resolvability_screen.ipynb`
 
 Run the synthetic notebook first. It is the user-run entry point for the locked
 three-state temporal-resolvability experiment and keeps manual results separate

@@ -450,8 +450,8 @@ fig, axes = plot_topographic_pair(
 ```
 
 `cell_centers` must be an `(n_rois, 2)` array in image `(x, y)` coordinates,
-and `background` may be any grayscale or RGB NumPy image, including a later
-hindbrain background. With `mid` set, the plot keeps the manuscript bilateral
+and `background` may be any grayscale or RGB NumPy anatomical image. With
+`mid` set, the plot keeps the manuscript bilateral
 color convention: node fill reports signed within-side drive and edges are
 black within side or gray across sides. Set `edge_color="crimson"` to use the
 reference anatomical information-flow overlay style. For saved arrays, run:
