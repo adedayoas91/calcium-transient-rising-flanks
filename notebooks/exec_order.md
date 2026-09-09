@@ -351,6 +351,8 @@ The notebook passes `--rise-waveform-length 20`, `--topology-mode sequence`, and
 
 Set `TAU` and `N_PASTS` in the parameter cell before running. When `TAU` is set, the notebook also defaults `RISE_MATCH_MIN_LAG` and `RISE_MATCH_MAX_LAG` to that same lag so the candidate screen and c-GC/c-GC* test the same offset.
 
+The notebook resumes when all analysis-defining settings match. If they do not, it preserves the existing directory as `dynamic_episodic_locked.incompatible-<digest>` and starts the requested configuration at `dynamic_episodic_locked`; rows from the two configurations are never combined.
+
 ## 3. Empirical Graph Artifacts
 
 7. `notebooks/motorneurons/c-GC_Motoneurons.ipynb`

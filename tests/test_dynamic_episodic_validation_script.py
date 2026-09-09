@@ -8,8 +8,10 @@ import numpy as np
 
 
 def _load_script_module():
-    path = Path(__file__).resolve().parents[1] / "examples" / (
-        "dynamic_episodic_validation.py"
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / ("dynamic_episodic_validation.py")
     )
     spec = importlib.util.spec_from_file_location("dynamic_episodic_validation", path)
     if spec is None or spec.loader is None:
@@ -94,9 +96,7 @@ class DynamicEpisodicValidationScriptTests(unittest.TestCase):
         self.assertTrue(all(row["method"] == "cgc-star" for row in summaries))
         self.assertEqual(contrasts[0]["method"], "cgc-star")
         self.assertAlmostEqual(contrasts[0]["rise_minus_fall_precision"], 0.4)
-        self.assertAlmostEqual(
-            contrasts[0]["rise_minus_fall_residual_recall"], 0.4
-        )
+        self.assertAlmostEqual(contrasts[0]["rise_minus_fall_residual_recall"], 0.4)
         self.assertAlmostEqual(contrasts[0]["rise_minus_full_recall"], 0.3)
         self.assertAlmostEqual(
             contrasts[0]["rise_minus_deconvolved_f1"],
@@ -106,7 +106,9 @@ class DynamicEpisodicValidationScriptTests(unittest.TestCase):
 
     def test_dynamic_metadata_reports_topology_counts_and_prevalence(self) -> None:
         script = _load_script_module()
-        episode = SimpleNamespace(rise_length=20, fall_length=42, fall_start=20, fall_stop=62)
+        episode = SimpleNamespace(
+            rise_length=20, fall_length=42, fall_start=20, fall_stop=62
+        )
         run = SimpleNamespace(
             dataset=SimpleNamespace(
                 episodes=(episode, episode),
@@ -209,7 +211,9 @@ class DynamicEpisodicValidationScriptTests(unittest.TestCase):
                 "precision": 0.5,
             }
 
-        rows = [row(1, representation) for representation in script.REPRESENTATION_ORDER]
+        rows = [
+            row(1, representation) for representation in script.REPRESENTATION_ORDER
+        ]
         rows.extend([row(2, "full"), row(2, "rise")])
 
         complete_rows = script._complete_grid_rows(rows)
@@ -244,6 +248,64 @@ class DynamicEpisodicValidationScriptTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 script._validate_resume_signature(
                     output_dir, {"n_steps": 480, "score_threshold": 0.1}
+                )
+
+    def test_incompatible_resume_can_restart_without_mixing_rows(self) -> None:
+        script = _load_script_module()
+
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "dynamic_episodic_locked"
+            output_dir.mkdir()
+            existing_signature = {
+                "max_lag": 1,
+                "tau": None,
+                "n_pasts": None,
+                "rise_match_max_lag": None,
+            }
+            requested_signature = {
+                "max_lag": 1,
+                "tau": 1,
+                "n_pasts": 3,
+                "rise_match_max_lag": 1,
+            }
+            script._write_resume_state(
+                output_dir,
+                config_signature=existing_signature,
+                total_units=160,
+                completed_units=87,
+                status="running",
+            )
+            (output_dir / script.GRID_RUNS_CSV).write_text("old rows\n")
+
+            archive = script._prepare_resume_output(
+                output_dir,
+                requested_signature,
+                restart_incompatible=True,
+            )
+
+            self.assertIsNotNone(archive)
+            self.assertTrue((archive / script.GRID_RUNS_CSV).is_file())
+            self.assertTrue((archive / script.RESUME_STATE_JSON).is_file())
+            self.assertEqual(list(output_dir.iterdir()), [])
+
+    def test_incompatible_resume_remains_strict_without_restart_flag(self) -> None:
+        script = _load_script_module()
+
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            script._write_resume_state(
+                output_dir,
+                config_signature={"n_pasts": None},
+                total_units=1,
+                completed_units=0,
+                status="running",
+            )
+
+            with self.assertRaises(ValueError):
+                script._prepare_resume_output(
+                    output_dir,
+                    {"n_pasts": 3},
+                    restart_incompatible=False,
                 )
 
 

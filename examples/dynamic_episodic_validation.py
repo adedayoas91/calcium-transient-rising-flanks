@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 from collections import defaultdict
@@ -368,9 +369,7 @@ def _summary_rows(
         }
         for metric in SUMMARY_METRICS:
             samples = [
-                float(value)
-                for row in values
-                if (value := row.get(metric)) is not None
+                float(value) for row in values if (value := row.get(metric)) is not None
             ]
             entry[f"{metric}_mean"] = float(np.mean(samples)) if samples else None
         summaries.append(entry)
@@ -526,7 +525,9 @@ def _complete_grid_rows(
         key = _row_run_key(row)
         representation = row.get("representation")
         if representation is None:
-            raise ValueError("resume grid row is missing required column: representation")
+            raise ValueError(
+                "resume grid row is missing required column: representation"
+            )
         if key not in grouped:
             grouped[key] = {}
             ordered_keys.append(key)
@@ -628,6 +629,47 @@ def _validate_resume_signature(
         )
 
 
+def _archive_incompatible_output(
+    output_dir: Path,
+    existing_signature: dict,
+) -> Path:
+    """Preserve an incompatible run beside a newly initialized output directory."""
+
+    digest = hashlib.sha256(
+        json.dumps(existing_signature, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:12]
+    candidate = output_dir.with_name(f"{output_dir.name}.incompatible-{digest}")
+    suffix = 1
+    while candidate.exists():
+        candidate = output_dir.with_name(
+            f"{output_dir.name}.incompatible-{digest}-{suffix}"
+        )
+        suffix += 1
+    output_dir.replace(candidate)
+    output_dir.mkdir(parents=True, exist_ok=False)
+    return candidate
+
+
+def _prepare_resume_output(
+    output_dir: Path,
+    current_signature: dict,
+    *,
+    restart_incompatible: bool,
+) -> Path | None:
+    """Validate a resume or archive it when an explicit restart was requested."""
+
+    try:
+        _validate_resume_signature(output_dir, current_signature)
+    except ValueError:
+        if not restart_incompatible:
+            raise
+        existing_signature = _load_resume_signature(output_dir)
+        if existing_signature is None:
+            raise RuntimeError("incompatible resume has no recoverable signature")
+        return _archive_incompatible_output(output_dir, existing_signature)
+    return None
+
+
 def _write_resume_state(
     output_dir: Path,
     *,
@@ -664,7 +706,17 @@ def parse_args() -> argparse.Namespace:
             "and run only missing or incomplete simulation units"
         ),
     )
-    parser.add_argument("--n-seeds", type=int, default=_env_int("RF_DYNAMIC_N_SEEDS", 5))
+    parser.add_argument(
+        "--restart-incompatible-resume",
+        action="store_true",
+        help=(
+            "when --resume finds different analysis settings, preserve the old "
+            "output directory beside the new run and restart from zero"
+        ),
+    )
+    parser.add_argument(
+        "--n-seeds", type=int, default=_env_int("RF_DYNAMIC_N_SEEDS", 5)
+    )
     parser.add_argument(
         "--n-steps", type=int, default=_env_int("RF_DYNAMIC_N_STEPS", 240)
     )
@@ -673,7 +725,9 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("RF_DYNAMIC_EVENT_MODES", "compressed,physical"),
         help="comma-separated subset of: compressed,physical",
     )
-    parser.add_argument("--max-lag", type=int, default=_env_int("RF_DYNAMIC_MAX_LAG", 1))
+    parser.add_argument(
+        "--max-lag", type=int, default=_env_int("RF_DYNAMIC_MAX_LAG", 1)
+    )
     parser.add_argument(
         "--tau",
         type=int,
@@ -952,7 +1006,17 @@ def main() -> None:
     )
     if args.resume:
         config_signature = _resume_signature(config)
-        _validate_resume_signature(args.output_dir, config_signature)
+        archive_dir = _prepare_resume_output(
+            args.output_dir,
+            config_signature,
+            restart_incompatible=args.restart_incompatible_resume,
+        )
+        if archive_dir is not None:
+            print(
+                "[resume] preserved incompatible output at "
+                f"{archive_dir}; restarting with the current configuration",
+                flush=True,
+            )
         if resume_state_path.exists():
             resume_state = json.loads(resume_state_path.read_text())
             previous_active_unit = resume_state.get("active_unit")

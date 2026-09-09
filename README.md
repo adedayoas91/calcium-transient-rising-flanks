@@ -183,7 +183,13 @@ single-method run or `--methods cgc,cgc-star` for one combined output set.
 If a dynamic validation run is interrupted, rerun the same command with
 `--resume`. The script reuses complete method/event-mode/condition/seed units
 from `dynamic_grid_runs.csv`, reruns missing or incomplete units, and refreshes
-the summary files. The publication-gate wrapper exposes the same behavior with
+the summaries. If you intentionally change analysis-defining settings, add
+`--restart-incompatible-resume`: the old output directory is retained beside
+the canonical path as `.incompatible-<digest>`, and the new configuration
+starts from zero without mixing rows. The Dynamic-A notebook enables this safe
+restart behavior by default.
+
+The publication-gate wrapper exposes the same resume behavior with
 `--resume-dynamic`.
 
 Run all remaining publication-gate jobs and then refresh the readiness,

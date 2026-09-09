@@ -145,8 +145,10 @@ class NotebookExecutionContractTests(unittest.TestCase):
     def test_long_running_notebooks_expose_live_progress(self) -> None:
         for path in _all_notebooks():
             payload = json.loads(path.read_text(encoding="utf-8"))
-            if not payload.get("metadata", {}).get("rising_flanks", {}).get(
-                "long_running"
+            if (
+                not payload.get("metadata", {})
+                .get("rising_flanks", {})
+                .get("long_running")
             ):
                 continue
             source = "\n".join(_code_cells(path))
@@ -179,7 +181,19 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 )
                 self.assertIn("--resume", source)
 
-    def test_direct_heavy_notebooks_declare_resume_and_checkpoint_primitives(self) -> None:
+    def test_dynamic_notebook_preserves_incompatible_resume_outputs(self) -> None:
+        source = "\n".join(
+            _code_cells(
+                NOTEBOOK_ROOT
+                / "simulations"
+                / "01_dynamic_episodic_validation_run.ipynb"
+            )
+        )
+        self.assertIn("--restart-incompatible-resume", source)
+
+    def test_direct_heavy_notebooks_declare_resume_and_checkpoint_primitives(
+        self,
+    ) -> None:
         for path in _all_notebooks():
             if path.name not in DIRECT_HEAVY_NOTEBOOKS:
                 continue
@@ -339,8 +353,10 @@ class NotebookExecutionContractTests(unittest.TestCase):
                     'os.environ.get("RF_RECORDINGS", "F3T1,F3T2,F5T2")', source
                 )
                 self.assertIn("expected - actual", source)
-                self.assertIn("total_fits = len(records) * len(REPRESENTATIONS)", source)
-                self.assertIn('representation_inputs[representation]', source)
+                self.assertIn(
+                    "total_fits = len(records) * len(REPRESENTATIONS)", source
+                )
+                self.assertIn("representation_inputs[representation]", source)
                 self.assertIn('"expected_fit_count": total_fits', source)
 
 
