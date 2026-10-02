@@ -68,7 +68,7 @@ def _load_grid_module() -> Any:
 grid = _load_grid_module()
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BASELINES = ("lpcmci", "oasis")
-ANALYSIS_REVISION = "full-cgc-parity-v1"
+ANALYSIS_VERSION = "full-cgc-parity-v1"
 CHAIN_EDGES = ((0, 1), (1, 2), (3, 4), (4, 5))
 CHAIN_MIDDLE = 3
 NOISE_LEVELS = (0.03, 0.06, 0.12, 0.24)
@@ -1081,7 +1081,7 @@ def main() -> None:
     methods = _methods(args.baseline, config)
     total_fits = len(units) * len(methods)
     diagnostic_config = {
-        "analysis_revision": ANALYSIS_REVISION,
+        "analysis_version": ANALYSIS_VERSION,
         "baseline": args.baseline,
         "baseline_config": config,
         "n_null": args.n_null,
@@ -1220,7 +1220,7 @@ def main() -> None:
     summary = {
         "status": "complete",
         "baseline": args.baseline,
-        "analysis_revision": ANALYSIS_REVISION,
+        "analysis_version": ANALYSIS_VERSION,
         "analysis_contract": (
             "Full H1-H4 parity with c-GC/c-GC*: representative characterization and "
             "recovery, matched locked grid, rise/fall paired tests, cyclic-shift and "

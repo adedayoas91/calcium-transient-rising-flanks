@@ -1,10 +1,10 @@
 # Notebook Execution Order
 
-Run notebooks from the `calcium-transient-rising-flank` package root so relative paths resolve cleanly. The four lowercase LPCMCI/OASIS notebooks are ready to execute results by default (`RUN_LPCMCI = True` or `RUN_OASIS = True`). Other preview-oriented wrappers retain their documented disabled launch toggles.
+Run notebooks from the `calcium-transient-rising-flank` package root so relative paths resolve cleanly. The lowercase LPCMCI, OASIS, PCMCI+, and VAR-Granger notebooks are ready to execute results by default. Other preview-oriented wrappers retain their documented disabled launch toggles.
 
-## Reviewer-Revision Campaign (Recommended Next Run)
+## Validation Campaign (Recommended Next Run)
 
-The reviewer-revision implementation is complete, but its scientific outputs
+The validation implementation is complete, but its scientific outputs
 have intentionally not been generated on this machine. Run the campaign on the
 compute machine before updating any result claim. IAAFT and bout-preserving
 surrogates are excluded from this campaign by author decision.
@@ -38,19 +38,19 @@ Preview the exact commands first:
 
 ```bash
 uv run --no-sync python \
-  examples/run_revision_campaign.py --resume --dry-run
+  examples/run_validation_campaign.py --resume --dry-run
 ```
 
 Then launch the full resumable campaign:
 
 ```bash
 uv run --no-sync python \
-  examples/run_revision_campaign.py --resume
+  examples/run_validation_campaign.py --resume
 ```
 
 The corresponding preview-first notebook is:
 
-1. `notebooks/simulations/08_revision_campaign_run.ipynb`
+1. `notebooks/simulations/08_validation_campaign_run.ipynb`
 
 Set `RUN_CAMPAIGN = True` only after inspecting the preview. The notebook passes
 `--resume`, and the campaign passes `--resume` to every potentially long child
@@ -58,19 +58,19 @@ runner. Re-executing the cell skips a stage only when its `summary.json`
 contains `"status": "complete"`; partial stages continue from their checkpoints.
 
 The campaign writes its top-level state to
-`outputs/revision_campaign/campaign_state.json` and executes these
-stages in the reviewer-recommended dependency order:
+`outputs/validation_campaign/campaign_state.json` and executes these
+stages in the prespecified dependency order:
 
 | Stage | Implementation | Primary completion marker |
 |---|---|---|
-| 1 | Matched BH empirical re-estimation plus edge-level graph artifacts | `outputs/revision_campaign/empirical_fdr/bh/summary.json` |
-| 2 | Matched unadjusted empirical re-estimation plus edge-level graph artifacts | `outputs/revision_campaign/empirical_fdr/unadjusted/summary.json` |
-| 3 | Held-out MAD/AR-residual per-ROI thresholds plus score sweeps for recovery, `W_IC`, and `W_RC` | `outputs/revision_campaign/threshold_calibration/summary.json` |
-| 4 | Mixed noncausal/causal-fall benchmark, overlap-allowed condition, and kinetic-misspecification condition | `outputs/revision_campaign/mixed_fall/summary.json` |
-| 5a | Raw LPCMCI PAG baseline on the exact static c-GC/c-GC* grid | `outputs/revision_campaign/lpcmci_simulation/summary.json` |
-| 5b | OASIS event/preprocessing baseline on the exact static c-GC/c-GC* grid | `outputs/revision_campaign/oasis_simulation/summary.json` |
-| 6 | Multi-lag, run-context, and bout-bounded physical-event hybrid grids | `outputs/revision_campaign/hybrid_event/summary.json` |
-| 7 | Thresholded-increment, change-point, and kinetics-template onset comparison | `outputs/revision_campaign/adaptive_onset/summary.json` |
+| 1 | Matched BH empirical re-estimation plus edge-level graph artifacts | `outputs/validation_campaign/empirical_fdr/bh/summary.json` |
+| 2 | Matched unadjusted empirical re-estimation plus edge-level graph artifacts | `outputs/validation_campaign/empirical_fdr/unadjusted/summary.json` |
+| 3 | Held-out MAD/AR-residual per-ROI thresholds plus score sweeps for recovery, `W_IC`, and `W_RC` | `outputs/validation_campaign/threshold_calibration/summary.json` |
+| 4 | Mixed noncausal/causal-fall benchmark, overlap-allowed condition, and kinetic-misspecification condition | `outputs/validation_campaign/mixed_fall/summary.json` |
+| 5a | Raw LPCMCI PAG baseline on the exact static c-GC/c-GC* grid | `outputs/validation_campaign/lpcmci_simulation/summary.json` |
+| 5b | OASIS event/preprocessing baseline on the exact static c-GC/c-GC* grid | `outputs/validation_campaign/oasis_simulation/summary.json` |
+| 6 | Multi-lag, run-context, and bout-bounded physical-event hybrid grids | `outputs/validation_campaign/hybrid_event/summary.json` |
+| 7 | Thresholded-increment, change-point, and kinetics-template onset comparison | `outputs/validation_campaign/adaptive_onset/summary.json` |
 
 The two empirical arms use the same cases, recordings, representations,
 estimators, seeds, alpha level, and 1,000 estimator surrogates. The only arm
@@ -90,14 +90,35 @@ Use these when a scheduler or failure requires running one family at a time:
 5. `notebooks/simulations/oasis.ipynb`
 6. `notebooks/motorneurons/lpcmci.ipynb`
 7. `notebooks/motorneurons/oasis.ipynb`
+8. `notebooks/simulations/pcmciplus.ipynb`
+9. `notebooks/simulations/var_granger.ipynb`
+10. `notebooks/motorneurons/pcmciplus.ipynb`
+11. `notebooks/motorneurons/var_granger.ipynb`
+
+PCMCI+ is the faster Tigramite comparator for autocorrelated series under
+causal sufficiency. VAR-Granger supplies the prespecified nested-model
+F-test baseline. Both runners include static and episodic simulations, signed
+input representations, raw method artifacts, and independent resumable output
+roots. They do not depend on the incomplete LPCMCI campaign.
+
+The method-validation cross-representation, signed-input, threshold, finite-
+permutation, and conditioning-depth analyses are run separately:
+
+```bash
+PYTHONPATH=src .venv/bin/python examples/run_method_validation_analyses.py
+```
+
+Use `--components` to run `cross`, `signed`, `depth`, `threshold`, or
+`permutation` independently. These analyses do not require LPCMCI output.
 
 Every heavy launch command in these notebooks contains `--resume`; there is no
 notebook toggle that disables checkpoint reuse. The mixed-fall and hybrid grids
 write to separate directories, as do threshold calibration and adaptive onset,
 so later stages cannot overwrite earlier evidence.
 
-The lowercase baseline notebooks start their result runs when their launch cell
-is executed; they do not default to preview or dry-run mode. Simulation baseline
+The LPCMCI and OASIS lowercase baseline notebooks start their result runs when
+their launch cell is executed; they do not default to preview or dry-run mode.
+Their simulation baseline
 units reproduce the static c-GC/c-GC* grid exactly: 10 outer networks, 20 seeded
 recordings per condition, 3,000 frames, and the native/noisy/slow-decay/
 low-framerate/shared-input conditions. After the matched grid completes, each
@@ -111,6 +132,11 @@ deduplicated `dff` and `f_smooth` records from
 root contains `input_manifest.csv`; matching unit keys must have identical
 `input_digest` values before results are compared. The c-GC/c-GC* static input
 manifests and motorneuron summary rows expose the same digests.
+
+The PCMCI+ and VAR-Granger notebooks use a smaller method-comparison grid by
+default: eight seeds, 1,500 frames, native/shared-input static simulations, and
+the episodic simulation. Their CLI settings are recorded in each output
+`summary.json` and can be increased before the publication run.
 
 The matched empirical runner also writes
 `observed_graph_artifacts_manifest.json` and compressed `.npz` files under each
@@ -129,7 +155,7 @@ uv run python examples/run_empirical_null_controls.py \
   --representations rise,fall --methods cgc,cgc-star \
   --n-null-replicates 0 --n-estimator-surrogates 1000 \
   --alpha 0.05 --event-mode physical --seed 10 --resume \
-  --output-dir outputs/revision_campaign/empirical_fdr/bh
+  --output-dir outputs/validation_campaign/empirical_fdr/bh
 
 # Matched unadjusted arm
 uv run python examples/run_empirical_null_controls.py \
@@ -137,45 +163,45 @@ uv run python examples/run_empirical_null_controls.py \
   --representations rise,fall --methods cgc,cgc-star \
   --n-null-replicates 0 --n-estimator-surrogates 1000 \
   --alpha 0.05 --event-mode physical --seed 10 --no-fdr --resume \
-  --output-dir outputs/revision_campaign/empirical_fdr/unadjusted
+  --output-dir outputs/validation_campaign/empirical_fdr/unadjusted
 
 # Held-out per-ROI threshold and W_IC/W_RC calibration
 uv run python examples/calibration_onset.py \
   --components threshold --n-estimator-surrogates 1000 --resume \
-  --output-dir outputs/revision_campaign/threshold_calibration
+  --output-dir outputs/validation_campaign/threshold_calibration
 
 # Mixed fall benchmark
 uv run python examples/dynamic_extensions.py \
   --methods cgc,cgc-star --grid lag1_context1 --n-seeds 8 \
   --n-surrogates 1000 --resume \
-  --output-dir outputs/revision_campaign/mixed_fall
+  --output-dir outputs/validation_campaign/mixed_fall
 
 # LPCMCI simulation baseline
 uv run --no-sync python examples/simulation_baselines.py \
   --components lpcmci \
   --representations full,deconvolved,rise,fall,fall_residual \
   --n-runs-outer 10 --n-seeds 20 --n-steps 3000 --resume \
-  --output-dir outputs/revision_campaign/lpcmci_simulation
+  --output-dir outputs/validation_campaign/lpcmci_simulation
 
 # OASIS simulation baseline
 uv run --no-sync python examples/simulation_baselines.py \
   --components oasis --representations full,deconvolved,oasis,rise,fall,fall_residual \
   --cgc-methods cgc,cgc-star --n-runs-outer 10 --n-seeds 20 --n-steps 3000 \
   --n-cgc-surrogates 1000 --resume --restart-incompatible-resume \
-  --output-dir outputs/revision_campaign/oasis_simulation
+  --output-dir outputs/validation_campaign/oasis_simulation
 
 # Full LPCMCI H1-H4 analysis after the matched grid
 uv run --no-sync python examples/simulation_baseline_diagnostics.py \
   --baseline lpcmci \
-  --baseline-dir outputs/revision_campaign/lpcmci_simulation \
-  --output-dir outputs/revision_campaign/lpcmci_simulation/full_analysis \
+  --baseline-dir outputs/validation_campaign/lpcmci_simulation \
+  --output-dir outputs/validation_campaign/lpcmci_simulation/full_analysis \
   --n-null 6 --resume
 
 # Full OASIS + downstream c-GC/c-GC* H1-H4 analysis after the matched grid
 uv run --no-sync python examples/simulation_baseline_diagnostics.py \
   --baseline oasis \
-  --baseline-dir outputs/revision_campaign/oasis_simulation \
-  --output-dir outputs/revision_campaign/oasis_simulation/full_analysis \
+  --baseline-dir outputs/validation_campaign/oasis_simulation \
+  --output-dir outputs/validation_campaign/oasis_simulation/full_analysis \
   --n-null 6 --resume
 
 # LPCMCI motorneuron baseline
@@ -183,7 +209,7 @@ uv run --no-sync python examples/empirical_baselines.py \
   --components lpcmci --fluo-types dff,f_smooth \
   --recordings F3T1,F3T2,F5T2 \
   --representations full,deconvolved,rise,fall,fall_residual --resume \
-  --output-dir outputs/revision_campaign/motorneurons_lpcmci
+  --output-dir outputs/validation_campaign/motorneurons_lpcmci
 
 # OASIS motorneuron preprocessing plus c-GC/c-GC* baselines
 uv run --no-sync python examples/empirical_baselines.py \
@@ -191,19 +217,19 @@ uv run --no-sync python examples/empirical_baselines.py \
   --recordings F3T1,F3T2,F5T2 \
   --oasis-outputs spikes,denoised --cgc-methods cgc,cgc-star \
   --n-cgc-surrogates 1000 --resume \
-  --output-dir outputs/revision_campaign/motorneurons_oasis
+  --output-dir outputs/validation_campaign/motorneurons_oasis
 
 # Hybrid physical-event grids
 uv run python examples/dynamic_extensions.py \
   --methods cgc,cgc-star \
   --grid lag2_context2,bout_bounded_lag3_context4 --n-seeds 8 \
   --n-surrogates 1000 --resume \
-  --output-dir outputs/revision_campaign/hybrid_event
+  --output-dir outputs/validation_campaign/hybrid_event
 
 # Adaptive-onset comparison
 uv run python examples/calibration_onset.py \
   --components onset --resume \
-  --output-dir outputs/revision_campaign/adaptive_onset
+  --output-dir outputs/validation_campaign/adaptive_onset
 ```
 
 ### 4. Resume and failure rules
@@ -224,8 +250,8 @@ uv run python examples/calibration_onset.py \
   fully written units are recovered even if interruption occurred before the
   progress JSON update.
 - Raw simulation LPCMCI `graph`, `p_matrix`, and `val_matrix` tensors are retained
-  under `outputs/revision_campaign/lpcmci_simulation/raw_pag/`; empirical
-  tensors are under `outputs/revision_campaign/motorneurons_lpcmci/raw_pag/`.
+  under `outputs/validation_campaign/lpcmci_simulation/raw_pag/`; empirical
+  tensors are under `outputs/validation_campaign/motorneurons_lpcmci/raw_pag/`.
   The binary lagged
   projection is lossy, is scored only as an undirected skeleton, and must not
   replace the PAG in reporting.
@@ -247,7 +273,7 @@ metadata and in an execution-contract cell:
 
 | Notebook family | Resume unit |
 |---|---|
-| Reviewer campaign, FDR, calibration/onset, mixed-fall/hybrid, and baseline wrappers | Runner-defined configuration-validated units via `--resume` |
+| Validation campaign, FDR, calibration/onset, mixed-fall/hybrid, and baseline wrappers | Runner-defined configuration-validated units via `--resume` |
 | Dynamic-A validation | Method × event mode × condition × seed |
 | Temporal-resolvability map | Regime × native delay × seed |
 | Motoneuron temporal screen | Case × recording |
@@ -257,7 +283,7 @@ metadata and in an execution-contract cell:
 | Static c-GC/c-GC* simulation notebooks | Atomic per-estimator-input cache shared across grids, nulls, and sweeps |
 | Dynamic hyperparameter explorer | Atomic per-simulation-input cache |
 
-The inline caches include an implementation revision and all estimator settings;
+The inline caches include an implementation version and all estimator settings;
 input-dependent caches also include a trace or representation digest. A settings
 or input change therefore selects a new cache or raises a configuration mismatch
 instead of silently mixing analyses.
@@ -265,7 +291,7 @@ instead of silently mixing analyses.
 ### 5. Post-run verification on the compute machine
 
 After all stage markers report complete, run the authored regression suite and
-inspect the campaign state before revising the manuscript:
+inspect the campaign state before updating the manuscript:
 
 ```bash
 uv run --no-sync python -m unittest discover -s tests -v
@@ -273,7 +299,7 @@ uv run --no-sync python -m unittest discover -s tests -v
 
 Then confirm that `campaign_state.json` and every stage `summary.json` reports
 `"status": "complete"`, inspect row counts against the saved configurations,
-and review raw PAG mark distributions before interpreting the lossy projection.
+and inspect raw PAG mark distributions before interpreting the lossy projection.
 No manuscript result should be changed from proposed/awaiting execution to
 completed solely because the code or notebook exists.
 

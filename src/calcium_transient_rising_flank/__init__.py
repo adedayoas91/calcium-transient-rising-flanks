@@ -10,6 +10,12 @@ from .baselines import (
     LPCMCIResult,
     OASISDeconvolver,
     OASISResult,
+    PCMCIPlusAdapter,
+    PCMCIPlusResult,
+    VARGrangerAdapter,
+    VARGrangerResult,
+    project_lagged_directed_graph,
+    project_significant_lagged_directed_graph,
     project_lossy_lagged_pag_skeleton,
 )
 
@@ -56,7 +62,13 @@ from .plotting import (
     plot_topographic_pair,
 )
 from .preprocessing import ScenarioData, build_scenarios
-from .representations import RepresentationBundle, build_representations, rising_flank
+from .representations import (
+    RepresentationBundle,
+    build_representations,
+    rising_flank,
+    signed_ar1_innovation,
+    signed_difference,
+)
 from .robustness import (
     SensitivityRun,
     SyntheticCondition,
@@ -112,6 +124,8 @@ __all__ = [
     "LPCMCIResult",
     "OASISDeconvolver",
     "OASISResult",
+    "PCMCIPlusAdapter",
+    "PCMCIPlusResult",
     "PartialAncestralGraph",
     "PipelineResult",
     "ResidualDiagnostics",
@@ -130,6 +144,8 @@ __all__ = [
     "TemporalPriorStateMasks",
     "ThresholdCalibrationResult",
     "TransientSummary",
+    "VARGrangerAdapter",
+    "VARGrangerResult",
     "add_paired_deltas",
     "array_input_digest",
     "build_representations",
@@ -158,10 +174,14 @@ __all__ = [
     "plot_matrix",
     "plot_topographic_graph",
     "plot_topographic_pair",
+    "project_lagged_directed_graph",
+    "project_significant_lagged_directed_graph",
     "project_lossy_lagged_pag_skeleton",
     "residual_diagnostics",
     "reverse_event_indices",
     "rising_flank",
+    "signed_ar1_innovation",
+    "signed_difference",
     "rise_flank_candidate_pairs",
     "run_analysis_sensitivity",
     "run_event_bootstrap_stability",

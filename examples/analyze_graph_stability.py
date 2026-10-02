@@ -15,8 +15,8 @@ import numpy as np
 
 DEFAULT_INPUT_DIR = Path("outputs/motorneurons")
 DEFAULT_OUTPUT_DIR = Path("outputs/graph_stability")
-DEFAULT_LPCMCI_INPUT_DIR = Path("outputs/revision_campaign/motorneurons_lpcmci")
-DEFAULT_OASIS_INPUT_DIR = Path("outputs/revision_campaign/motorneurons_oasis")
+DEFAULT_LPCMCI_INPUT_DIR = Path("outputs/validation_campaign/motorneurons_lpcmci")
+DEFAULT_OASIS_INPUT_DIR = Path("outputs/validation_campaign/motorneurons_oasis")
 
 METHOD_CACHE_FILES = (
     ("cgc", "cgc_motoneurons_weighted_adjacency_matrices.pkl"),

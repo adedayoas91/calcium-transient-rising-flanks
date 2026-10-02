@@ -8,6 +8,8 @@ from calcium_transient_rising_flank.representations import (
     deconvolve_ar1,
     falling_flank,
     rising_flank,
+    signed_ar1_innovation,
+    signed_difference,
 )
 
 
@@ -30,6 +32,17 @@ class RepresentationTests(unittest.TestCase):
         np.testing.assert_allclose(events, [[0.0, 1.0, 0.0, 0.0, 0.0]])
         self.assertAlmostEqual(residual[0, 2], 0.0)
         self.assertGreater(residual[0, 4], 0.0)
+
+    def test_signed_representations_retain_negative_changes(self) -> None:
+        traces = np.array([[0.0, 1.0, 0.8, 0.2]])
+
+        differences = signed_difference(traces)
+        innovations = signed_ar1_innovation(traces, gamma=0.8)
+
+        np.testing.assert_allclose(differences, [[0.0, 1.0, -0.2, -0.6]])
+        np.testing.assert_allclose(innovations, [[0.0, 1.0, 0.0, -0.44]])
+        self.assertLess(differences[0, 2], 0.0)
+        self.assertLess(innovations[0, 3], 0.0)
 
     def test_representation_bundle_contains_all_manuscript_comparators(self) -> None:
         traces = np.array([[0.0, 1.0, 0.8], [0.0, 0.2, 0.1]])

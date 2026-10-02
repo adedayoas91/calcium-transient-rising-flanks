@@ -555,6 +555,95 @@ class GcStar:
         )
         return self
 
+    def _cross_conditioning_set(
+        self,
+        predictors_shifted: np.ndarray,
+        outcomes_shifted: np.ndarray,
+        row_index: int,
+        target: int,
+    ) -> np.ndarray:
+        """Build a conditioning set for source and outcome representations."""
+
+        source = row_index % self.n_neur
+        source_lag = row_index // self.n_neur
+        if self.method == "fcgc":
+            predictor_rows = np.delete(predictors_shifted, row_index, axis=0)
+            outcome_rows = np.delete(outcomes_shifted, target, axis=0)
+            return np.vstack([predictor_rows, outcome_rows])
+
+        rows: list[np.ndarray] = []
+        for lag in range(source_lag + 1, self.n_pasts + 1):
+            rows.append(predictors_shifted[lag * self.n_neur + source])
+        for lag in range(1, self.n_pasts + 1):
+            rows.append(outcomes_shifted[lag * self.n_neur + target])
+        for other in range(self.n_neur):
+            if other in {source, target}:
+                continue
+            for lag in range(source_lag, self.n_pasts + 1):
+                rows.append(predictors_shifted[lag * self.n_neur + other])
+        if not rows:
+            return np.empty((0, predictors_shifted.shape[1]))
+        return np.asarray(rows, dtype=float)
+
+    def fit_cross(
+        self,
+        predictors: np.ndarray,
+        outcomes: np.ndarray,
+        verbose: int = 0,
+        eligible_pairs: np.ndarray | None = None,
+    ) -> "GcStar":
+        """Fit source representation at lag to a distinct target representation."""
+
+        if predictors.shape != outcomes.shape:
+            raise ValueError("predictors and outcomes must have matching shapes")
+        self.data = predictors.copy()
+        self.outcomes = outcomes.copy()
+        self.n_neur = predictors.shape[0]
+        self._configure_logging(verbose)
+        eligible = self._normalise_eligible_pairs(eligible_pairs, self.n_neur)
+        predictors_shifted = self.shift_data(predictors.copy())
+        outcomes_shifted = self.shift_data(outcomes.copy())
+        n_rows = predictors_shifted.shape[0]
+        diagnostics = self._init_pair_diagnostics(self.n_pasts)
+        corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_corr = np.ones((n_rows, self.n_neur), dtype=float)
+        inv_corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_inv = np.ones((n_rows, self.n_neur), dtype=float)
+
+        for row_index in range(n_rows):
+            source = row_index % self.n_neur
+            lag = row_index // self.n_neur
+            for target in range(self.n_neur):
+                if not self._pair_is_eligible(eligible, source, target):
+                    self._record_pair_diagnostic(diagnostics, lag, "mask_skipped")
+                    continue
+                x = predictors_shifted[row_index]
+                y = outcomes_shifted[target]
+                if x.size < 2 or y.size < 2:
+                    self._record_pair_diagnostic(
+                        diagnostics, lag, "insufficient_sample"
+                    )
+                    continue
+                corr[row_index, target] = self._safe_abs_corr(x, y)
+                p_corr[row_index, target] = self._safe_perm_test(x, y)
+                z = self._cross_conditioning_set(
+                    predictors_shifted,
+                    outcomes_shifted,
+                    row_index,
+                    target,
+                )
+                x_res = regression_residual(x, z)
+                y_res = regression_residual(y, z)
+                inv_corr[row_index, target] = self._safe_abs_corr(x_res, y_res)
+                p_inv[row_index, target] = self._safe_perm_test(x_res, y_res)
+                self._record_pair_diagnostic(diagnostics, lag, "completed")
+
+        self.shifted_data = predictors_shifted
+        self.corr_, self.pVal_corr_ = corr, p_corr
+        self.inv_corr_, self.pVal_inv_corr_ = inv_corr, p_inv
+        self.pair_diagnostics_ = diagnostics
+        return self
+
     def fit(
         self,
         data: np.ndarray,

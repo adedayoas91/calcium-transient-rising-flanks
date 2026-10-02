@@ -1,103 +1,109 @@
 binary,case,dataset,delta_rise_minus_fall,description,fall_value,fish,fluo_type,method,method_internal,metric,recording,rise_value,trace,trial
-False,A,motoneurons,0.451377474796664,bad neurons and artefacts retained,0.34844788234721125,3,A,rising_flank_cgc,rising_flank_cgc,w_ic,F3T1,0.7998253571438753,1,
-False,A,motoneurons,0.6900517490174027,bad neurons and artefacts retained,0.0,3,A,rising_flank_cgc,rising_flank_cgc,w_rc,F3T1,0.6900517490174027,1,
-False,A,motoneurons,0.04945054945054945,bad neurons and artefacts retained,0.06043956043956044,3,A,rising_flank_cgc,rising_flank_cgc,edge_density,F3T1,0.10989010989010989,1,
-False,A,motoneurons,9.0,bad neurons and artefacts retained,11.0,3,A,rising_flank_cgc,rising_flank_cgc,retained_edges,F3T1,20.0,1,
-False,A,motoneurons,3.593718361808399,bad neurons and artefacts retained,1.5643893993066111,3,A,rising_flank_cgc,rising_flank_cgc,total_weight,F3T1,5.15810776111501,1,
-False,A,motoneurons,3.500677367212645,bad neurons and artefacts retained,0.4917121571443147,3,A,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F3T1,3.99238952435696,1,
-False,A,motoneurons,0.09304099459575332,bad neurons and artefacts retained,1.0726772421622965,3,A,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F3T1,1.1657182367580499,1,
-False,A,motoneurons,2.754955374041277,bad neurons and artefacts retained,0.0,3,A,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F3T1,2.754955374041277,1,
-False,A,motoneurons,0.7457219931713684,bad neurons and artefacts retained,0.4917121571443147,3,A,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F3T1,1.2374341503156832,1,
-False,A,motoneurons,1.0,bad neurons and artefacts retained,0.0,3,A,rising_flank_cgc,rising_flank_cgc,w_ic,F3T2,1.0,2,
-False,A,motoneurons,0.08181818181818182,bad neurons and artefacts retained,0.03636363636363636,3,A,rising_flank_cgc,rising_flank_cgc,edge_density,F3T2,0.11818181818181818,2,
-False,A,motoneurons,9.0,bad neurons and artefacts retained,4.0,3,A,rising_flank_cgc,rising_flank_cgc,retained_edges,F3T2,13.0,2,
-False,A,motoneurons,2.8179425240369715,bad neurons and artefacts retained,0.5215705405398904,3,A,rising_flank_cgc,rising_flank_cgc,total_weight,F3T2,3.339513064576862,2,
-False,A,motoneurons,3.3395130645768623,bad neurons and artefacts retained,0.0,3,A,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F3T2,3.3395130645768623,2,
-False,A,motoneurons,-0.5215705405398904,bad neurons and artefacts retained,0.5215705405398904,3,A,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F3T2,0.0,2,
-False,A,motoneurons,2.1259612909681906,bad neurons and artefacts retained,0.0,3,A,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F3T2,2.1259612909681906,2,
-False,A,motoneurons,1.2135517736086712,bad neurons and artefacts retained,0.0,3,A,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F3T2,1.2135517736086712,2,
-False,A,motoneurons,0.14619883040935672,bad neurons and artefacts retained,0.0,5,A,rising_flank_cgc,rising_flank_cgc,edge_density,F5T2,0.14619883040935672,2,
-False,A,motoneurons,50.0,bad neurons and artefacts retained,0.0,5,A,rising_flank_cgc,rising_flank_cgc,retained_edges,F5T2,50.0,2,
-False,A,motoneurons,12.279551219563228,bad neurons and artefacts retained,0.0,5,A,rising_flank_cgc,rising_flank_cgc,total_weight,F5T2,12.279551219563228,2,
-False,A,motoneurons,11.708595786079629,bad neurons and artefacts retained,0.0,5,A,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F5T2,11.708595786079629,2,
-False,A,motoneurons,0.5709554334835991,bad neurons and artefacts retained,0.0,5,A,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F5T2,0.5709554334835991,2,
-False,A,motoneurons,6.642786653928508,bad neurons and artefacts retained,0.0,5,A,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F5T2,6.642786653928508,2,
-False,A,motoneurons,5.065809132151121,bad neurons and artefacts retained,0.0,5,A,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F5T2,5.065809132151121,2,
-False,B,motoneurons,0.451377474796664,bad neurons removed; artefacts retained,0.34844788234721125,3,B,rising_flank_cgc,rising_flank_cgc,w_ic,F3T1,0.7998253571438753,1,
-False,B,motoneurons,0.6900517490174027,bad neurons removed; artefacts retained,0.0,3,B,rising_flank_cgc,rising_flank_cgc,w_rc,F3T1,0.6900517490174027,1,
-False,B,motoneurons,0.04945054945054945,bad neurons removed; artefacts retained,0.06043956043956044,3,B,rising_flank_cgc,rising_flank_cgc,edge_density,F3T1,0.10989010989010989,1,
-False,B,motoneurons,9.0,bad neurons removed; artefacts retained,11.0,3,B,rising_flank_cgc,rising_flank_cgc,retained_edges,F3T1,20.0,1,
-False,B,motoneurons,3.593718361808399,bad neurons removed; artefacts retained,1.5643893993066111,3,B,rising_flank_cgc,rising_flank_cgc,total_weight,F3T1,5.15810776111501,1,
-False,B,motoneurons,3.500677367212645,bad neurons removed; artefacts retained,0.4917121571443147,3,B,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F3T1,3.99238952435696,1,
-False,B,motoneurons,0.09304099459575332,bad neurons removed; artefacts retained,1.0726772421622965,3,B,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F3T1,1.1657182367580499,1,
-False,B,motoneurons,2.754955374041277,bad neurons removed; artefacts retained,0.0,3,B,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F3T1,2.754955374041277,1,
-False,B,motoneurons,0.7457219931713684,bad neurons removed; artefacts retained,0.4917121571443147,3,B,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F3T1,1.2374341503156832,1,
-False,B,motoneurons,1.0,bad neurons removed; artefacts retained,0.0,3,B,rising_flank_cgc,rising_flank_cgc,w_ic,F3T2,1.0,2,
-False,B,motoneurons,0.08181818181818182,bad neurons removed; artefacts retained,0.03636363636363636,3,B,rising_flank_cgc,rising_flank_cgc,edge_density,F3T2,0.11818181818181818,2,
-False,B,motoneurons,9.0,bad neurons removed; artefacts retained,4.0,3,B,rising_flank_cgc,rising_flank_cgc,retained_edges,F3T2,13.0,2,
-False,B,motoneurons,2.8179425240369715,bad neurons removed; artefacts retained,0.5215705405398904,3,B,rising_flank_cgc,rising_flank_cgc,total_weight,F3T2,3.339513064576862,2,
-False,B,motoneurons,3.3395130645768623,bad neurons removed; artefacts retained,0.0,3,B,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F3T2,3.3395130645768623,2,
-False,B,motoneurons,-0.5215705405398904,bad neurons removed; artefacts retained,0.5215705405398904,3,B,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F3T2,0.0,2,
-False,B,motoneurons,2.1259612909681906,bad neurons removed; artefacts retained,0.0,3,B,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F3T2,2.1259612909681906,2,
-False,B,motoneurons,1.2135517736086712,bad neurons removed; artefacts retained,0.0,3,B,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F3T2,1.2135517736086712,2,
-False,B,motoneurons,-0.04663470472574882,bad neurons removed; artefacts retained,1.0,5,B,rising_flank_cgc,rising_flank_cgc,w_ic,F5T2,0.9533652952742512,2,
-False,B,motoneurons,0.5734129183648818,bad neurons removed; artefacts retained,0.0,5,B,rising_flank_cgc,rising_flank_cgc,w_rc,F5T2,0.5734129183648818,2,
-False,B,motoneurons,0.15808823529411767,bad neurons removed; artefacts retained,0.003676470588235294,5,B,rising_flank_cgc,rising_flank_cgc,edge_density,F5T2,0.16176470588235295,2,
-False,B,motoneurons,43.0,bad neurons removed; artefacts retained,1.0,5,B,rising_flank_cgc,rising_flank_cgc,retained_edges,F5T2,44.0,2,
-False,B,motoneurons,10.355825095638986,bad neurons removed; artefacts retained,0.14436750068516474,5,B,rising_flank_cgc,rising_flank_cgc,total_weight,F5T2,10.500192596324151,2,
-False,B,motoneurons,9.808135211189603,bad neurons removed; artefacts retained,0.14436750068516474,5,B,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F5T2,9.952502711874768,2,
-False,B,motoneurons,0.5476898844493825,bad neurons removed; artefacts retained,0.0,5,B,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F5T2,0.5476898844493825,2,
-False,B,motoneurons,5.706893625050512,bad neurons removed; artefacts retained,0.0,5,B,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F5T2,5.706893625050512,2,
-False,B,motoneurons,4.101241586139092,bad neurons removed; artefacts retained,0.14436750068516474,5,B,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F5T2,4.245609086824256,2,
-False,C,motoneurons,0.5169121311407847,bad neurons and artefacts removed,0.2728511247639282,3,C,rising_flank_cgc,rising_flank_cgc,w_ic,F3T1,0.789763255904713,1,
-False,C,motoneurons,0.40979310566440175,bad neurons and artefacts removed,0.2641845865201121,3,C,rising_flank_cgc,rising_flank_cgc,w_rc,F3T1,0.6739776921845139,1,
-False,C,motoneurons,0.04395604395604395,bad neurons and artefacts removed,0.08241758241758242,3,C,rising_flank_cgc,rising_flank_cgc,edge_density,F3T1,0.12637362637362637,1,
-False,C,motoneurons,8.0,bad neurons and artefacts removed,15.0,3,C,rising_flank_cgc,rising_flank_cgc,retained_edges,F3T1,23.0,1,
-False,C,motoneurons,3.943823454820496,bad neurons and artefacts removed,2.188826436079994,3,C,rising_flank_cgc,rising_flank_cgc,total_weight,F3T1,6.13264989090049,1,
-False,C,motoneurons,4.1467098249186805,bad neurons and artefacts removed,0.5326688313938842,3,C,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F3T1,4.679378656312565,1,
-False,C,motoneurons,-0.2028863700981849,bad neurons and artefacts removed,1.6561576046861102,3,C,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F3T1,1.4532712345879253,1,
-False,C,motoneurons,3.013073932665069,bad neurons and artefacts removed,0.1407228949739446,3,C,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F3T1,3.1537968276390136,1,
-False,C,motoneurons,1.1336358922536114,bad neurons and artefacts removed,0.3919459364199396,3,C,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F3T1,1.525581828673551,1,
-False,C,motoneurons,0.9297199719922175,bad neurons and artefacts removed,0.0,3,C,rising_flank_cgc,rising_flank_cgc,w_ic,F3T2,0.9297199719922175,2,
-False,C,motoneurons,0.09090909090909091,bad neurons and artefacts removed,0.02727272727272727,3,C,rising_flank_cgc,rising_flank_cgc,edge_density,F3T2,0.11818181818181818,2,
-False,C,motoneurons,10.0,bad neurons and artefacts removed,3.0,3,C,rising_flank_cgc,rising_flank_cgc,retained_edges,F3T2,13.0,2,
-False,C,motoneurons,2.992033704851969,bad neurons and artefacts removed,0.421541200638593,3,C,rising_flank_cgc,rising_flank_cgc,total_weight,F3T2,3.413574905490562,2,
-False,C,motoneurons,3.1296779941097466,bad neurons and artefacts removed,0.0,3,C,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F3T2,3.1296779941097466,2,
-False,C,motoneurons,-0.1376442892577776,bad neurons and artefacts removed,0.4215412006385929,3,C,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F3T2,0.2838969113808153,2,
-False,C,motoneurons,1.4246338489165777,bad neurons and artefacts removed,0.0,3,C,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F3T2,1.4246338489165777,2,
-False,C,motoneurons,1.7050441451931695,bad neurons and artefacts removed,0.0,3,C,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F3T2,1.7050441451931695,2,
-False,C,motoneurons,0.11273454543287198,bad neurons and artefacts removed,0.7698229899087784,5,C,rising_flank_cgc,rising_flank_cgc,w_ic,F5T2,0.8825575353416504,2,
-False,C,motoneurons,0.2535359190364685,bad neurons and artefacts removed,0.3493753942183148,5,C,rising_flank_cgc,rising_flank_cgc,w_rc,F5T2,0.6029113132547833,2,
-False,C,motoneurons,0.14705882352941177,bad neurons and artefacts removed,0.014705882352941176,5,C,rising_flank_cgc,rising_flank_cgc,edge_density,F5T2,0.16176470588235295,2,
-False,C,motoneurons,40.0,bad neurons and artefacts removed,4.0,5,C,rising_flank_cgc,rising_flank_cgc,retained_edges,F5T2,44.0,2,
-False,C,motoneurons,10.4230551599071,bad neurons and artefacts removed,0.41033471972956476,5,C,rising_flank_cgc,rising_flank_cgc,total_weight,F5T2,10.833389879636666,2,
-False,C,motoneurons,9.115710237345334,bad neurons and artefacts removed,0.30705060211296026,5,C,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F5T2,9.422760839458295,2,
-False,C,motoneurons,1.3073449225617684,bad neurons and artefacts removed,0.10328411761660442,5,C,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F5T2,1.4106290401783728,2,
-False,C,motoneurons,5.573813187045359,bad neurons and artefacts removed,0.10727592515818644,5,C,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F5T2,5.681089112203545,2,
-False,C,motoneurons,3.541897050299976,bad neurons and artefacts removed,0.19977467695477386,5,C,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F5T2,3.7416717272547495,2,
-False,D,motoneurons,-0.11758486266707974,corrected traces smoothed,0.27010866419326485,3,D,rising_flank_cgc,rising_flank_cgc,w_ic,F3T1,0.1525238015261851,1,
-False,D,motoneurons,1.0,corrected traces smoothed,0.0,3,D,rising_flank_cgc,rising_flank_cgc,w_rc,F3T1,1.0,1,
-False,D,motoneurons,-0.03296703296703296,corrected traces smoothed,0.10989010989010989,3,D,rising_flank_cgc,rising_flank_cgc,edge_density,F3T1,0.07692307692307693,1,
-False,D,motoneurons,-6.0,corrected traces smoothed,20.0,3,D,rising_flank_cgc,rising_flank_cgc,retained_edges,F3T1,14.0,1,
-False,D,motoneurons,6.486039496921094,corrected traces smoothed,2.878360960372641,3,D,rising_flank_cgc,rising_flank_cgc,total_weight,F3T1,9.364400457293735,1,
-False,D,motoneurons,0.5583719207238976,corrected traces smoothed,0.6931495876633785,3,D,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F3T1,1.2515215083872762,1,
-False,D,motoneurons,5.927667576197197,corrected traces smoothed,2.1852113727092624,3,D,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F3T1,8.11287894890646,1,
-False,D,motoneurons,1.2515215083872762,corrected traces smoothed,0.0,3,D,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F3T1,1.2515215083872762,1,
-False,D,motoneurons,-0.6931495876633785,corrected traces smoothed,0.6931495876633785,3,D,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F3T1,0.0,1,
-False,D,motoneurons,0.5163624871772556,corrected traces smoothed,0.0,3,D,rising_flank_cgc,rising_flank_cgc,w_ic,F3T2,0.5163624871772556,2,
-False,D,motoneurons,0.06363636363636363,corrected traces smoothed,0.00909090909090909,3,D,rising_flank_cgc,rising_flank_cgc,edge_density,F3T2,0.07272727272727272,2,
-False,D,motoneurons,7.0,corrected traces smoothed,1.0,3,D,rising_flank_cgc,rising_flank_cgc,retained_edges,F3T2,8.0,2,
-False,D,motoneurons,3.6498906526650674,corrected traces smoothed,0.12161196036152712,3,D,rising_flank_cgc,rising_flank_cgc,total_weight,F3T2,3.7715026130265947,2,
-False,D,motoneurons,1.7757031396623626,corrected traces smoothed,0.0,3,D,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F3T2,1.7757031396623626,2,
-False,D,motoneurons,1.874187513002705,corrected traces smoothed,0.12161196036152712,3,D,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F3T2,1.9957994733642321,2,
-False,D,motoneurons,0.9483121046222334,corrected traces smoothed,0.0,3,D,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F3T2,0.9483121046222334,2,
-False,D,motoneurons,0.8273910350401293,corrected traces smoothed,0.0,3,D,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F3T2,0.8273910350401293,2,
-False,D,motoneurons,-0.8939338457254618,corrected traces smoothed,1.0,5,D,rising_flank_cgc,rising_flank_cgc,w_ic,F5T2,0.10606615427453821,2,
-False,D,motoneurons,0.06960376008173227,corrected traces smoothed,0.1949327429983662,5,D,rising_flank_cgc,rising_flank_cgc,w_rc,F5T2,0.26453650308009846,2,
-False,D,motoneurons,0.04779411764705882,corrected traces smoothed,0.01838235294117647,5,D,rising_flank_cgc,rising_flank_cgc,edge_density,F5T2,0.0661764705882353,2,
-False,D,motoneurons,13.0,corrected traces smoothed,5.0,5,D,rising_flank_cgc,rising_flank_cgc,retained_edges,F5T2,18.0,2,
-False,D,motoneurons,12.805268818394586,corrected traces smoothed,0.6392410776553124,5,D,rising_flank_cgc,rising_flank_cgc,total_weight,F5T2,13.444509896049897,2,
-False,D,motoneurons,0.6434376429338596,corrected traces smoothed,0.6392410776553125,5,D,rising_flank_cgc,rising_flank_cgc,ipsilateral_weight,F5T2,1.282678720589172,2,
-False,D,motoneurons,12.161831175460723,corrected traces smoothed,0.0,5,D,rising_flank_cgc,rising_flank_cgc,contralateral_weight,F5T2,12.161831175460723,2,
-False,D,motoneurons,0.21470632661533268,corrected traces smoothed,0.12460901670458165,5,D,rising_flank_cgc,rising_flank_cgc,rostrocaudal_weight,F5T2,0.3393153433199143,2,
-False,D,motoneurons,0.42873131631852723,corrected traces smoothed,0.5146320609507307,5,D,rising_flank_cgc,rising_flank_cgc,caudorostral_weight,F5T2,0.9433633772692579,2,
+False,dff,motoneurons,0.10566407445714543,,0.7955267118084652,3,dff,cgc,cgc,w_ic,F3T1,0.9011907862656107,1,1
+False,dff,motoneurons,0.010021574391005705,,0.5174683087761497,3,dff,cgc,cgc,w_rc,F3T1,0.5274898831671554,1,1
+False,dff,motoneurons,-0.01648351648351648,,0.4065934065934066,3,dff,cgc,cgc,edge_density,F3T1,0.3901098901098901,1,1
+False,dff,motoneurons,-3.0,,74.0,3,dff,cgc,cgc,retained_edges,F3T1,71.0,1,1
+False,dff,motoneurons,-9.976822533746798,,60.86281746234742,3,dff,cgc,cgc,total_weight,F3T1,50.885994928600624,1,1
+False,dff,motoneurons,-1.7073175441471093,,46.82234394275185,3,dff,cgc,cgc,ipsilateral_weight,F3T1,45.11502639860474,1,1
+False,dff,motoneurons,-8.269504989599698,,14.040473519595574,3,dff,cgc,cgc,contralateral_weight,F3T1,5.770968529995876,1,1
+False,dff,motoneurons,-0.4313591289078538,,24.229079132991,3,dff,cgc,cgc,rostrocaudal_weight,F3T1,23.797720004083146,1,1
+False,dff,motoneurons,-1.2759584152392556,,22.59326480976085,3,dff,cgc,cgc,caudorostral_weight,F3T1,21.317306394521594,1,1
+False,dff,motoneurons,0.08740010902452278,,0.9125998909754772,3,dff,cgc,cgc,w_ic,F3T2,1.0,2,2
+False,dff,motoneurons,0.01996607532865874,,0.49223231109550586,3,dff,cgc,cgc,w_rc,F3T2,0.5121983864241646,2,2
+False,dff,motoneurons,-0.0636363636363636,,0.41818181818181815,3,dff,cgc,cgc,edge_density,F3T2,0.35454545454545455,2,2
+False,dff,motoneurons,-7.0,,46.0,3,dff,cgc,cgc,retained_edges,F3T2,39.0,2,2
+False,dff,motoneurons,2.103830447175419,,29.991433839292206,3,dff,cgc,cgc,total_weight,F3T2,32.095264286467625,2,2
+False,dff,motoneurons,5.195297048403891,,26.899967238063734,3,dff,cgc,cgc,ipsilateral_weight,F3T2,32.095264286467625,2,2
+False,dff,motoneurons,-3.0914666012284733,,3.0914666012284733,3,dff,cgc,cgc,contralateral_weight,F3T2,0.0,2,2
+False,dff,motoneurons,3.198109537400331,,13.241033041985506,3,dff,cgc,cgc,rostrocaudal_weight,F3T2,16.439142579385837,2,2
+False,dff,motoneurons,1.9971875110035633,,13.658934196078228,3,dff,cgc,cgc,caudorostral_weight,F3T2,15.656121707081791,2,2
+False,dff,motoneurons,0.09045435898654253,,0.8954053698949693,5,dff,cgc,cgc,w_ic,F5T2,0.9858597288815119,2,2
+False,dff,motoneurons,-0.05194009134360178,,0.5223251050445571,5,dff,cgc,cgc,w_rc,F5T2,0.4703850137009553,2,2
+False,dff,motoneurons,-0.022058823529411797,,0.4007352941176471,5,dff,cgc,cgc,edge_density,F5T2,0.3786764705882353,2,2
+False,dff,motoneurons,-6.0,,109.0,5,dff,cgc,cgc,retained_edges,F5T2,103.0,2,2
+False,dff,motoneurons,4.061417870615145,,83.88462598665058,5,dff,cgc,cgc,total_weight,F5T2,87.94604385726572,2,2
+False,dff,motoneurons,12.408088228233197,,74.14139557931685,5,dff,cgc,cgc,ipsilateral_weight,F5T2,86.54948380755005,2,2
+False,dff,motoneurons,-8.346670357618056,,9.743230407333726,5,dff,cgc,cgc,contralateral_weight,F5T2,1.3965600497156707,2,2
+False,dff,motoneurons,1.9856678925083031,,38.725912234116734,5,dff,cgc,cgc,rostrocaudal_weight,F5T2,40.71158012662504,2,2
+False,dff,motoneurons,10.422420335724894,,35.415483345200116,5,dff,cgc,cgc,caudorostral_weight,F5T2,45.83790368092501,2,2
+False,f_smooth,motoneurons,0.0065367855668185815,,0.9934632144331814,3,f_smooth,cgc,cgc,w_ic,F3T1,1.0,1,1
+False,f_smooth,motoneurons,-0.005558904908832929,,0.5504909251548723,3,f_smooth,cgc,cgc,w_rc,F3T1,0.5449320202460394,1,1
+False,f_smooth,motoneurons,-0.010989010989011005,,0.2967032967032967,3,f_smooth,cgc,cgc,edge_density,F3T1,0.2857142857142857,1,1
+False,f_smooth,motoneurons,-2.0,,54.0,3,f_smooth,cgc,cgc,retained_edges,F3T1,52.0,1,1
+False,f_smooth,motoneurons,-3.190981856410403,,44.62903035170848,3,f_smooth,cgc,cgc,total_weight,F3T1,41.43804849529808,1,1
+False,f_smooth,motoneurons,-2.851000119320908,,44.28904861461898,3,f_smooth,cgc,cgc,ipsilateral_weight,F3T1,41.43804849529807,1,1
+False,f_smooth,motoneurons,-0.3399817370895146,,0.3399817370895146,3,f_smooth,cgc,cgc,contralateral_weight,F3T1,0.0,1,1
+False,f_smooth,motoneurons,-1.7997998644945845,,24.380719346090714,3,f_smooth,cgc,cgc,rostrocaudal_weight,F3T1,22.58091948159613,1,1
+False,f_smooth,motoneurons,-1.0512002548263162,,19.90832926852826,3,f_smooth,cgc,cgc,caudorostral_weight,F3T1,18.857129013701943,1,1
+False,f_smooth,motoneurons,0.0,,1.0,3,f_smooth,cgc,cgc,w_ic,F3T2,1.0,2,2
+False,f_smooth,motoneurons,0.008422515690532206,,0.5426948539823131,3,f_smooth,cgc,cgc,w_rc,F3T2,0.5511173696728453,2,2
+False,f_smooth,motoneurons,0.1,,0.24545454545454545,3,f_smooth,cgc,cgc,edge_density,F3T2,0.34545454545454546,2,2
+False,f_smooth,motoneurons,11.0,,27.0,3,f_smooth,cgc,cgc,retained_edges,F3T2,38.0,2,2
+False,f_smooth,motoneurons,8.144235014381369,,24.208644292441708,3,f_smooth,cgc,cgc,total_weight,F3T2,32.35287930682308,2,2
+False,f_smooth,motoneurons,8.144235014381376,,24.208644292441708,3,f_smooth,cgc,cgc,ipsilateral_weight,F3T2,32.352879306823084,2,2
+False,f_smooth,motoneurons,0.0,,0.0,3,f_smooth,cgc,cgc,contralateral_weight,F3T2,0.0,2,2
+False,f_smooth,motoneurons,4.692327065522953,,13.137906679396409,3,f_smooth,cgc,cgc,rostrocaudal_weight,F3T2,17.83023374491936,2,2
+False,f_smooth,motoneurons,3.4519079488584232,,11.0707376130453,3,f_smooth,cgc,cgc,caudorostral_weight,F3T2,14.522645561903722,2,2
+False,f_smooth,motoneurons,0.0,,1.0,5,f_smooth,cgc,cgc,w_ic,F5T2,1.0,2,2
+False,f_smooth,motoneurons,0.031056433136426365,,0.462666131467703,5,f_smooth,cgc,cgc,w_rc,F5T2,0.4937225646041294,2,2
+False,f_smooth,motoneurons,0.033088235294117696,,0.27205882352941174,5,f_smooth,cgc,cgc,edge_density,F5T2,0.30514705882352944,2,2
+False,f_smooth,motoneurons,9.0,,74.0,5,f_smooth,cgc,cgc,retained_edges,F5T2,83.0,2,2
+False,f_smooth,motoneurons,11.928871342998434,,65.98221296970416,5,f_smooth,cgc,cgc,total_weight,F5T2,77.9110843127026,2,2
+False,f_smooth,motoneurons,11.928871342998448,,65.98221296970416,5,f_smooth,cgc,cgc,ipsilateral_weight,F5T2,77.91108431270261,2,2
+False,f_smooth,motoneurons,0.0,,0.0,5,f_smooth,cgc,cgc,contralateral_weight,F5T2,0.0,2,2
+False,f_smooth,motoneurons,7.93872513758496,,30.527735220371127,5,f_smooth,cgc,cgc,rostrocaudal_weight,F5T2,38.46646035795609,2,2
+False,f_smooth,motoneurons,3.990146205413488,,35.45447774933304,5,f_smooth,cgc,cgc,caudorostral_weight,F5T2,39.444623954746525,2,2
+False,dff,motoneurons,0.12278710376486601,,0.7929931860266615,3,dff,cgc-star,fcgc,w_ic,F3T1,0.9157802897915275,1,1
+False,dff,motoneurons,0.03895418149525043,,0.5003714299719466,3,dff,cgc-star,fcgc,w_rc,F3T1,0.539325611467197,1,1
+False,dff,motoneurons,-0.043956043956043966,,0.4230769230769231,3,dff,cgc-star,fcgc,edge_density,F3T1,0.3791208791208791,1,1
+False,dff,motoneurons,-8.0,,77.0,3,dff,cgc-star,fcgc,retained_edges,F3T1,69.0,1,1
+False,dff,motoneurons,-13.016805952152211,,63.094497202732825,3,dff,cgc-star,fcgc,total_weight,F3T1,50.077691250580614,1,1
+False,dff,motoneurons,-3.139512031443715,,48.36486363595633,3,dff,cgc-star,fcgc,ipsilateral_weight,F3T1,45.22535160451262,1,1
+False,dff,motoneurons,-9.877293920708505,,14.72963356677649,3,dff,cgc-star,fcgc,contralateral_weight,F3T1,4.8523396460679855,1,1
+False,dff,motoneurons,0.19079443000108753,,24.20039597792167,3,dff,cgc-star,fcgc,rostrocaudal_weight,F3T1,24.391190407922757,1,1
+False,dff,motoneurons,-3.3303064614447884,,24.164467658034656,3,dff,cgc-star,fcgc,caudorostral_weight,F3T1,20.834161196589868,1,1
+False,dff,motoneurons,0.08089211401275342,,0.9191078859872466,3,dff,cgc-star,fcgc,w_ic,F3T2,1.0,2,2
+False,dff,motoneurons,0.004575329891944591,,0.49223231109550586,3,dff,cgc-star,fcgc,w_rc,F3T2,0.49680764098745045,2,2
+False,dff,motoneurons,-0.04545454545454547,,0.4090909090909091,3,dff,cgc-star,fcgc,edge_density,F3T2,0.36363636363636365,2,2
+False,dff,motoneurons,-5.0,,45.0,3,dff,cgc-star,fcgc,retained_edges,F3T2,40.0,2,2
+False,dff,motoneurons,3.231345683449703,,29.74097676471812,3,dff,cgc-star,fcgc,total_weight,F3T2,32.97232244816782,2,2
+False,dff,motoneurons,6.072355210104089,,26.899967238063734,3,dff,cgc-star,fcgc,ipsilateral_weight,F3T2,32.97232244816782,2,2
+False,dff,motoneurons,-2.8410095266543864,,2.8410095266543864,3,dff,cgc-star,fcgc,contralateral_weight,F3T2,0.0,2,2
+False,dff,motoneurons,3.1398686913663063,,13.241033041985506,3,dff,cgc-star,fcgc,rostrocaudal_weight,F3T2,16.380901733351813,2,2
+False,dff,motoneurons,2.932486518737786,,13.658934196078228,3,dff,cgc-star,fcgc,caudorostral_weight,F3T2,16.591420714816014,2,2
+False,dff,motoneurons,0.09687121607951266,,0.8900947185072144,5,dff,cgc-star,fcgc,w_ic,F5T2,0.9869659345867271,2,2
+False,dff,motoneurons,-0.030683896645972708,,0.49504114797728743,5,dff,cgc-star,fcgc,w_rc,F5T2,0.4643572513313147,2,2
+False,dff,motoneurons,-0.03308823529411764,,0.40441176470588236,5,dff,cgc-star,fcgc,edge_density,F5T2,0.3713235294117647,2,2
+False,dff,motoneurons,-9.0,,110.0,5,dff,cgc-star,fcgc,retained_edges,F5T2,101.0,2,2
+False,dff,motoneurons,3.648935664687997,,83.19797147768546,5,dff,cgc-star,fcgc,total_weight,F5T2,86.84690714237345,2,2
+False,dff,motoneurons,12.525018674757732,,73.05049559263962,5,dff,cgc-star,fcgc,ipsilateral_weight,F5T2,85.57551426739735,2,2
+False,dff,motoneurons,-8.876083010069738,,10.147475885045836,5,dff,cgc-star,fcgc,contralateral_weight,F5T2,1.2713928749760965,2,2
+False,dff,motoneurons,3.5746093879822496,,36.16300119849009,5,dff,cgc-star,fcgc,rostrocaudal_weight,F5T2,39.73761058647234,2,2
+False,dff,motoneurons,8.950409286775482,,36.88749439414953,5,dff,cgc-star,fcgc,caudorostral_weight,F5T2,45.83790368092501,2,2
+False,f_smooth,motoneurons,0.006559269683742652,,0.9934407303162573,3,f_smooth,cgc-star,fcgc,w_ic,F3T1,1.0,1,1
+False,f_smooth,motoneurons,-0.05073951769399909,,0.534549431269429,3,f_smooth,cgc-star,fcgc,w_rc,F3T1,0.4838099135754299,1,1
+False,f_smooth,motoneurons,-0.03296703296703296,,0.2967032967032967,3,f_smooth,cgc-star,fcgc,edge_density,F3T1,0.26373626373626374,1,1
+False,f_smooth,motoneurons,-6.0,,54.0,3,f_smooth,cgc-star,fcgc,retained_edges,F3T1,48.0,1,1
+False,f_smooth,motoneurons,-5.409684852592164,,44.47621573088212,3,f_smooth,cgc-star,fcgc,total_weight,F3T1,39.06653087828995,1,1
+False,f_smooth,motoneurons,-5.069703115502655,,44.1362339937926,3,f_smooth,cgc-star,fcgc,ipsilateral_weight,F3T1,39.066530878289946,1,1
+False,f_smooth,motoneurons,-0.3399817370895146,,0.3399817370895146,3,f_smooth,cgc-star,fcgc,contralateral_weight,F3T1,0.0,1,1
+False,f_smooth,motoneurons,-4.69222385183895,,23.592998779756275,3,f_smooth,cgc-star,fcgc,rostrocaudal_weight,F3T1,18.900774927917325,1,1
+False,f_smooth,motoneurons,-0.3774792636637052,,20.54323521403633,3,f_smooth,cgc-star,fcgc,caudorostral_weight,F3T1,20.165755950372624,1,1
+False,f_smooth,motoneurons,0.0,,1.0,3,f_smooth,cgc-star,fcgc,w_ic,F3T2,1.0,2,2
+False,f_smooth,motoneurons,-0.00865189754251694,,0.5302984962687407,3,f_smooth,cgc-star,fcgc,w_rc,F3T2,0.5216465987262238,2,2
+False,f_smooth,motoneurons,0.04545454545454547,,0.2636363636363636,3,f_smooth,cgc-star,fcgc,edge_density,F3T2,0.3090909090909091,2,2
+False,f_smooth,motoneurons,5.0,,29.0,3,f_smooth,cgc-star,fcgc,retained_edges,F3T2,34.0,2,2
+False,f_smooth,motoneurons,4.849831930150177,,25.582693245412262,3,f_smooth,cgc-star,fcgc,total_weight,F3T2,30.43252517556244,2,2
+False,f_smooth,motoneurons,4.849831930150177,,25.582693245412262,3,f_smooth,cgc-star,fcgc,ipsilateral_weight,F3T2,30.43252517556244,2,2
+False,f_smooth,motoneurons,0.0,,0.0,3,f_smooth,cgc-star,fcgc,contralateral_weight,F3T2,0.0,2,2
+False,f_smooth,motoneurons,2.30855948993573,,13.566463758546593,3,f_smooth,cgc-star,fcgc,rostrocaudal_weight,F3T2,15.875023248482323,2,2
+False,f_smooth,motoneurons,2.541272440214449,,12.016229486865669,3,f_smooth,cgc-star,fcgc,caudorostral_weight,F3T2,14.557501927080118,2,2
+False,f_smooth,motoneurons,0.0,,1.0,5,f_smooth,cgc-star,fcgc,w_ic,F5T2,1.0,2,2
+False,f_smooth,motoneurons,-0.0046872150251302536,,0.48416369184129765,5,f_smooth,cgc-star,fcgc,w_rc,F5T2,0.4794764768161674,2,2
+False,f_smooth,motoneurons,0.011029411764705899,,0.28308823529411764,5,f_smooth,cgc-star,fcgc,edge_density,F5T2,0.29411764705882354,2,2
+False,f_smooth,motoneurons,3.0,,77.0,5,f_smooth,cgc-star,fcgc,retained_edges,F5T2,80.0,2,2
+False,f_smooth,motoneurons,6.1940034539947675,,68.76449609203823,5,f_smooth,cgc-star,fcgc,total_weight,F5T2,74.958499546033,2,2
+False,f_smooth,motoneurons,6.194003453994782,,68.76449609203823,5,f_smooth,cgc-star,fcgc,ipsilateral_weight,F5T2,74.95849954603301,2,2
+False,f_smooth,motoneurons,0.0,,0.0,5,f_smooth,cgc-star,fcgc,contralateral_weight,F5T2,0.0,2,2
+False,f_smooth,motoneurons,2.6475649742304768,,33.293272295527714,5,f_smooth,cgc-star,fcgc,rostrocaudal_weight,F5T2,35.94083726975819,2,2
+False,f_smooth,motoneurons,3.546438479764305,,35.471223796510515,5,f_smooth,cgc-star,fcgc,caudorostral_weight,F5T2,39.01766227627482,2,2

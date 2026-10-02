@@ -1,0 +1,66 @@
+{
+  "status": "complete",
+  "config": {
+    "resume_schema_version": 3,
+    "data_dir": "data/motoneurons",
+    "cases": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "recordings": "all",
+    "representations": [
+      "full",
+      "deconvolved",
+      "rise",
+      "fall",
+      "fall_residual"
+    ],
+    "methods": [
+      "cgc",
+      "cgc-star"
+    ],
+    "n_null_replicates": 20,
+    "max_jitter": 1,
+    "max_lag": 1,
+    "n_estimator_surrogates": 0,
+    "alpha": 0.05,
+    "score_threshold": 0.0,
+    "event_mode": "physical",
+    "fdr": true,
+    "seed": 0,
+    "edge_testing_family": "eligible non-self ordered ROI pairs within each recording/case/method/representation"
+  },
+  "data_dir": "data/motoneurons",
+  "cases": [
+    "A",
+    "B",
+    "C",
+    "D"
+  ],
+  "recordings": "all",
+  "representations": [
+    "full",
+    "deconvolved",
+    "rise",
+    "fall",
+    "fall_residual"
+  ],
+  "methods": [
+    "cgc",
+    "cgc-star"
+  ],
+  "method": null,
+  "n_rows": 16920,
+  "n_summary_rows": 208,
+  "n_contrast_rows": 168,
+  "expected_top_level_fit_count": 16920,
+  "edge_testing_family": "eligible non-self ordered ROI pairs within each recording/case/method/representation",
+  "outputs": [
+    "null_control_rows.csv",
+    "null_control_summary.csv",
+    "null_control_contrasts.csv",
+    "observed_graph_artifacts_manifest.json"
+  ]
+}

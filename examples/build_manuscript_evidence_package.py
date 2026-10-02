@@ -180,7 +180,7 @@ def _write_csv(
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = fieldnames or tuple(sorted({field for row in rows for field in row}))
     with path.open("w", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=fields)
+        writer = csv.DictWriter(file, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -335,7 +335,8 @@ def build_empirical_pairing_interpretation_rows(
                 "direction": _delta_direction(mean_delta),
                 "evidence_strength": strength,
                 "manuscript_use": (
-                    "descriptive until empirical null and stability gates are complete"
+                    "descriptive paired result; interpret jointly with empirical "
+                    "null-control and stability evidence"
                 ),
             }
         )
@@ -835,6 +836,14 @@ def build_markdown_report(
         for row in empirical_null_rows
         if row["evidence_strength"] == "descriptive_observed_above_null"
     ]
+    rise_null_rows = [
+        row for row in empirical_null_rows if row["representation"] == "rise"
+    ]
+    rise_null_nominal = [
+        row
+        for row in rise_null_rows
+        if row["evidence_strength"] == "nominal_observed_above_null"
+    ]
     dynamic_zero_truth_support = [
         row
         for row in dynamic_rows
@@ -890,8 +899,8 @@ def build_markdown_report(
                 f"{_format_float(wrc_mean)}; max delta {_format_float(wrc_max)}."
             ),
             (
-                "- These paired tests are descriptive until empirical null-control "
-                "and stability outputs exist."
+                "- These small-sample paired tests are descriptive; interpret them "
+                "jointly with the null-control and stability evidence below."
             ),
             "",
             "## Synthetic Tradeoffs",
@@ -918,6 +927,10 @@ def build_markdown_report(
         lines.append(
             f"- Nominal observed-above-null rows: {len(null_nominal)}; "
             f"descriptive observed-above-null rows: {len(null_descriptive)}."
+        )
+        lines.append(
+            f"- Rise-specific nominal observed-above-null rows: "
+            f"{len(rise_null_nominal)} / {len(rise_null_rows)}."
         )
     else:
         lines.append(
@@ -988,6 +1001,14 @@ def build_latex_snippet(
         for row in empirical_null_rows
         if row["evidence_strength"] == "descriptive_observed_above_null"
     ]
+    rise_null_rows = [
+        row for row in empirical_null_rows if row["representation"] == "rise"
+    ]
+    rise_null_nominal = [
+        row
+        for row in rise_null_rows
+        if row["evidence_strength"] == "nominal_observed_above_null"
+    ]
     stable_rows = [
         row
         for row in empirical_stability_rows
@@ -1038,7 +1059,8 @@ def build_latex_snippet(
             f"{len(empirical_null_rows)} metric-level interpretation rows. "
             f"{len(null_nominal)} rows are nominal observed-above-null results, "
             f"and {len(null_descriptive)} rows are descriptive observed-above-null "
-            "results."
+            f"results. {len(rise_null_nominal)} of {len(rise_null_rows)} "
+            "rise-specific rows are nominal observed-above-null results."
         )
     else:
         lines.append(

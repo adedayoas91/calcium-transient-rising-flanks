@@ -40,8 +40,20 @@ RUNNER_NOTEBOOKS = {
     "motorneurons/oasis.ipynb": {
         "examples/empirical_baselines.py",
     },
-    "08_revision_campaign_run.ipynb": {
-        "examples/run_revision_campaign.py",
+    "simulations/pcmciplus.ipynb": {
+        "examples/run_fast_causal_baselines.py",
+    },
+    "simulations/var_granger.ipynb": {
+        "examples/run_fast_causal_baselines.py",
+    },
+    "motorneurons/pcmciplus.ipynb": {
+        "examples/run_fast_causal_baselines.py",
+    },
+    "motorneurons/var_granger.ipynb": {
+        "examples/run_fast_causal_baselines.py",
+    },
+    "08_validation_campaign_run.ipynb": {
+        "examples/run_validation_campaign.py",
     },
     "fdr_reestimation.ipynb": {
         "examples/run_empirical_null_controls.py",
@@ -71,7 +83,7 @@ SAFE_RUN_TOGGLES = {
         "RUN_MIXED_FALL",
         "RUN_HYBRID",
     ),
-    "08_revision_campaign_run.ipynb": ("RUN_CAMPAIGN",),
+    "08_validation_campaign_run.ipynb": ("RUN_CAMPAIGN",),
     "fdr_reestimation.ipynb": ("RUN_BH", "RUN_UNADJUSTED"),
     "Temporal_resolvability_screen.ipynb": ("RUN_SCREEN",),
 }
@@ -80,16 +92,24 @@ READY_TO_RUN_TOGGLES = {
     "simulations/oasis.ipynb": "RUN_OASIS",
     "motorneurons/lpcmci.ipynb": "RUN_LPCMCI",
     "motorneurons/oasis.ipynb": "RUN_OASIS",
+    "simulations/pcmciplus.ipynb": "RUN_PCMCIPLUS",
+    "simulations/var_granger.ipynb": "RUN_VAR_GRANGER",
+    "motorneurons/pcmciplus.ipynb": "RUN_PCMCIPLUS",
+    "motorneurons/var_granger.ipynb": "RUN_VAR_GRANGER",
 }
 PORTABLE_RUNNER_NOTEBOOKS = (
     "simulations/05_calibration_onset_run.ipynb",
     "simulations/06_dynamic_extensions_run.ipynb",
-    "simulations/08_revision_campaign_run.ipynb",
+    "simulations/08_validation_campaign_run.ipynb",
     "simulations/lpcmci.ipynb",
     "simulations/oasis.ipynb",
     "motorneurons/fdr_reestimation.ipynb",
     "motorneurons/lpcmci.ipynb",
     "motorneurons/oasis.ipynb",
+    "simulations/pcmciplus.ipynb",
+    "simulations/var_granger.ipynb",
+    "motorneurons/pcmciplus.ipynb",
+    "motorneurons/var_granger.ipynb",
 )
 
 
@@ -200,7 +220,7 @@ class NotebookExecutionContractTests(unittest.TestCase):
             source = "\n".join(_code_cells(path))
             with self.subTest(notebook=path.name):
                 self.assertRegex(source, r"\bRESUME\s*=\s*True\b")
-                self.assertIn("IMPLEMENTATION_REVISION", source)
+                self.assertIn("VALIDATION_VERSION", source)
                 self.assertTrue(
                     any(
                         marker in source

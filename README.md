@@ -141,7 +141,7 @@ PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache
   .venv/bin/python examples/build_sensitivity_package.py
 ```
 
-The package writes `outputs/reviewer_sensitivity/dynamic_seed_summary.csv`,
+The package writes `outputs/method_sensitivity/dynamic_seed_summary.csv`,
 `dynamic_paired_contrasts.csv`, `dynamic_generator_seed_rows.csv`,
 `dynamic_generator_summary.csv`, `threshold_smoothing_seed_rows.csv`,
 `threshold_smoothing_summary.csv`, `threshold_smoothing_sensitivity.png`, and
@@ -269,7 +269,7 @@ Use `--method cgc` for a single-method run.
 
 The saved outputs do not contain per-edge p-value matrices, so a BH-FDR versus
 unadjusted empirical comparison currently requires re-estimation. The following
-commands declare the review comparison without running it implicitly. With
+commands declare the multiple-testing comparison without running it implicitly. With
 cases C/D, three recordings, two representations, two methods, and the
 mandatory observed/reverse-time/cross-recording fits, they request 72
 1000-surrogate graph fits per arm (144 total):

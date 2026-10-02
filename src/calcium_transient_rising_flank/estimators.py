@@ -673,6 +673,7 @@ class CausalisedGC:
         physical: bool,
         candidate_adjacency: np.ndarray | None = None,
         hypothesis_weights: np.ndarray | None = None,
+        estimator_label: str | None = None,
     ) -> GraphResult:
         n_nodes = core.data.shape[0]
         candidate_mask = self._candidate_mask(core.data, candidate_adjacency)
@@ -696,6 +697,15 @@ class CausalisedGC:
             core.pVal_inv_corr_[lag_rows].reshape(tested_lags.size, n_nodes, n_nodes),
             nan=1.0,
         )
+        if self.n_surrogates:
+            correlation_p_values_by_lag = finite_sample_permutation_p_values(
+                correlation_p_values_by_lag,
+                self.n_surrogates,
+            )
+            conditional_p_values_by_lag = finite_sample_permutation_p_values(
+                conditional_p_values_by_lag,
+                self.n_surrogates,
+            )
         p_values_by_lag = np.maximum(
             correlation_p_values_by_lag,
             conditional_p_values_by_lag,
@@ -743,7 +753,11 @@ class CausalisedGC:
             p_values=p_values,
             adjacency=adjacency,
             best_lags=best_lags,
-            estimator=self._method_label(physical),
+            estimator=(
+                self._method_label(physical)
+                if estimator_label is None
+                else estimator_label
+            ),
             candidate_adjacency=candidate_mask,
             hypothesis_weights=weights,
             pair_diagnostics=(
@@ -765,14 +779,22 @@ class CausalisedGC:
     ) -> GraphResult:
         """Fit c-GC/c-GC* on full traces or selected event frames."""
 
-        if outcomes is not None:
-            raise NotImplementedError("cross-representation GC is not implemented")
         if segment_ids is not None and self.event_mode != "physical":
             raise NotImplementedError(
                 "segment-aware c-GC/c-GC* requires event_mode='physical'"
             )
 
         data = validate_traces(traces)
+        outcome_data = None if outcomes is None else validate_traces(outcomes)
+        if outcome_data is not None and outcome_data.shape != data.shape:
+            raise ValueError("outcomes must match traces in ROI and time dimensions")
+        if outcome_data is not None and (
+            event_indices is not None or segment_ids is not None
+        ):
+            raise NotImplementedError(
+                "cross-representation GC currently requires the complete physical "
+                "time axis without event or segment selection"
+            )
         indices = self._indices(data, event_indices)
         candidate_mask = self._candidate_mask(data, candidate_adjacency)
         core_eligible_pairs = None if candidate_adjacency is None else candidate_mask
@@ -789,13 +811,23 @@ class CausalisedGC:
         physical = self.event_mode == "physical" and (
             indices is not None or segments is not None
         )
+        def fit_core():
+            if outcome_data is not None:
+                return self._core().fit_cross(
+                    data,
+                    outcome_data,
+                    verbose=0,
+                    eligible_pairs=core_eligible_pairs,
+                )
+            return self._fit_core(data, indices, segments, core_eligible_pairs)
+
         if self.random_state is None:
-            core = self._fit_core(data, indices, segments, core_eligible_pairs)
+            core = fit_core()
         else:
             random_state = np.random.get_state()
             try:
                 np.random.seed(self.random_state)
-                core = self._fit_core(data, indices, segments, core_eligible_pairs)
+                core = fit_core()
             finally:
                 np.random.set_state(random_state)
         return self._graph_from_core(
@@ -803,4 +835,9 @@ class CausalisedGC:
             physical=physical,
             candidate_adjacency=candidate_mask,
             hypothesis_weights=weights,
+            estimator_label=(
+                None
+                if outcome_data is None
+                else f"cross_representation_{self._method_label(False)}"
+            ),
         )

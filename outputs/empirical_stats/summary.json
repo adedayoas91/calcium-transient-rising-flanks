@@ -1,7 +1,7 @@
 {
-  "input": "outputs/chen_comparison/chen_comparison_rows.csv",
-  "n_input_rows": 37,
-  "n_delta_rows": 102,
+  "input": "/Users/sadiq.adedayo/Documents/projects/others/calcium-transient-rising-flanks/outputs/chen_comparison/chen_comparison_rows.csv",
+  "n_input_rows": 85,
+  "n_delta_rows": 108,
   "n_test_rows": 36,
   "metric_fields": [
     "w_ic",

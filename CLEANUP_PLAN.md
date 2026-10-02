@@ -1,5 +1,16 @@
 # Cleanup And Implementation Plan
 
+## Terminology Cleanup Plan
+
+1. Rename process-oriented orchestration and analysis entry points to neutral
+   validation terminology.
+2. Replace process-oriented notebook metadata, output roots, and prose while
+   preserving checkpoint compatibility through explicit version changes.
+3. Move existing output directories without deleting generated evidence and
+   update every source, test, notebook, and documentation reference.
+4. Verify that source-controlled project files contain no submission-process
+   terminology, then run lint, typing, and the full test suite.
+
 ## Scope
 
 This pass is restricted to `calcium-transient-rising-flank/`. It aligns the
@@ -37,8 +48,9 @@ than implementing a separate Granger learner.
 2. Fixed-length signal representations: full, AR(1)-deconvolved, rising, and
    falling traces, plus decay-null falling residuals.
 3. Directed estimation: a thin result-shaping adapter around the supplied
-   c-GC/c-GC* implementation; no package-owned bivariate or multivariate
-   Granger implementation.
+   c-GC/c-GC* implementation. A later method-validation extension adds an
+   explicitly labeled conditional VAR-Granger baseline; it is not used as a
+   substitute inside the c-GC/c-GC* pipeline.
 4. Metrics: `W_IC`, `W_IC_bin`, paired `Delta W_IC`, `W_RC`, edge-recovery,
    and graph-stability summaries.
 5. Validation: synthetic event/calcium generation and cyclic-shift null
@@ -65,9 +77,11 @@ than implementing a separate Granger learner.
 - The supplied c-GC/c-GC* implementation is used as the computational
   foundation; it does not claim anatomical synapse recovery.
 - Segment-aware physical event mode is implemented inside the supplied
-  c-GC/c-GC* core path for discontinuity handling; cross-representation
-  fall-to-rise GC remains unsupported unless explicitly added later.
-- No bivariate or multivariate GC baseline is implemented in this package.
+  c-GC/c-GC* core path for discontinuity handling. Cross-representation
+  fall-to-rise GC is supported on the complete physical time axis; combining
+  it with selected-frame or segment filtering remains unsupported.
+- The method-validation baseline module may expose conditional VAR-Granger,
+  provided its predictive (not interventional) semantics remain explicit.
 - Optional latent-confounding-aware algorithms such as LPCMCI and SVAR-FCI are
   represented by an adapter boundary only unless their dependencies and
   estimator configuration are explicitly supplied later.

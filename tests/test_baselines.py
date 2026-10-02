@@ -7,6 +7,10 @@ import numpy as np
 from calcium_transient_rising_flank.baselines import (
     LPCMCIAdapter,
     OASISDeconvolver,
+    PCMCIPlusAdapter,
+    VARGrangerAdapter,
+    project_lagged_directed_graph,
+    project_significant_lagged_directed_graph,
     project_lossy_lagged_pag_skeleton,
 )
 from calcium_transient_rising_flank.sensitivity import PartialAncestralGraph
@@ -142,6 +146,82 @@ class BaselineAdapterTests(unittest.TestCase):
             LPCMCIAdapter(tau_max=1, run_kwargs={"tau_max": 2}).fit(
                 np.ones((2, 4))
             )
+
+    def test_pcmciplus_adapter_preserves_raw_graph_and_lagged_direction(self) -> None:
+        traces = np.array([[1.0, 2.0, 3.0, 4.0], [0.0, 1.0, 0.0, 1.0]])
+        captured: dict[str, object] = {}
+        graph = np.full((2, 2, 3), "", dtype=object)
+        graph[0, 1, 0] = "o-o"
+        graph[0, 1, 1] = "-->"
+        p_matrix = np.full((2, 2, 3), 0.5)
+        val_matrix = np.zeros((2, 2, 3))
+
+        class FakeCondIndTest:
+            pass
+
+        class FakeEstimator:
+            def __init__(self, dataframe: object, cond_ind_test: object, verbosity: int):
+                captured["dataframe"] = dataframe
+                captured["verbosity"] = verbosity
+
+            def run_pcmciplus(self, **kwargs: object) -> dict[str, np.ndarray]:
+                captured["run_kwargs"] = kwargs
+                return {
+                    "graph": graph,
+                    "p_matrix": p_matrix,
+                    "val_matrix": val_matrix,
+                }
+
+        result = PCMCIPlusAdapter(
+            tau_max=2,
+            run_kwargs={"tau_min": 1, "pc_alpha": 0.1},
+            dataframe_factory=lambda data: {"data": data.copy()},
+            cond_ind_test_factory=FakeCondIndTest,
+            estimator_factory=FakeEstimator,
+        ).fit(traces)
+
+        self.assertEqual(
+            captured["run_kwargs"],
+            {"tau_max": 2, "tau_min": 1, "pc_alpha": 0.1},
+        )
+        np.testing.assert_array_equal(
+            result.lagged_adjacency(),
+            np.array([[False, True], [False, False]]),
+        )
+        np.testing.assert_array_equal(
+            project_lagged_directed_graph(graph), result.lagged_adjacency()
+        )
+
+        adjusted = p_matrix.copy()
+        adjusted[0, 1, 1] = 0.01
+        np.testing.assert_array_equal(
+            project_significant_lagged_directed_graph(graph, adjusted, 0.05),
+            result.lagged_adjacency(),
+        )
+
+    def test_var_granger_recovers_strong_lagged_driver(self) -> None:
+        rng = np.random.default_rng(7)
+        n_steps = 800
+        traces = np.zeros((3, n_steps), dtype=float)
+        innovations = rng.normal(scale=0.3, size=traces.shape)
+        for time in range(1, n_steps):
+            traces[0, time] = 0.4 * traces[0, time - 1] + innovations[0, time]
+            traces[1, time] = (
+                0.3 * traces[1, time - 1]
+                + 1.2 * traces[0, time - 1]
+                + innovations[1, time]
+            )
+            traces[2, time] = 0.2 * traces[2, time - 1] + innovations[2, time]
+
+        result = VARGrangerAdapter(max_lag=1, alpha=0.01, fdr=True).fit(traces)
+
+        self.assertTrue(result.adjacency[0, 1])
+        self.assertLess(result.p_values[0, 1], 0.01)
+        self.assertEqual(result.best_lags[0, 1], 1)
+        self.assertGreater(result.coefficients[0, 1, 0], 0.0)
+        self.assertTrue(result.stable)
+        self.assertLess(result.companion_spectral_radius, 1.0)
+        self.assertFalse(np.any(np.diag(result.adjacency)))
 
 
 if __name__ == "__main__":

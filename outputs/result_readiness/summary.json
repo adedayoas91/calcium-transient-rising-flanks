@@ -1,7 +1,12 @@
 {
+  "status": "complete",
+  "output_root": "outputs",
+  "dynamic_output_dir": "/Users/sadiq.adedayo/Documents/projects/others/calcium-transient-rising-flanks/outputs/validation_results/dynamic_episodic_locked",
+  "null_output_dir": "/Users/sadiq.adedayo/Documents/projects/others/calcium-transient-rising-flanks/outputs/empirical_null_controls",
+  "stability_output_dir": "/Users/sadiq.adedayo/Documents/projects/others/calcium-transient-rising-flanks/outputs/empirical_stability",
   "total_artifacts": 14,
-  "available_artifacts": 9,
-  "missing_artifacts": 5,
-  "missing_user_run_artifacts": 5,
-  "ready_for_publication_claims": false
+  "available_artifacts": 14,
+  "missing_artifacts": 0,
+  "missing_user_run_artifacts": 0,
+  "ready_for_publication_claims": true
 }

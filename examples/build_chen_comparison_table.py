@@ -20,8 +20,8 @@ from calcium_transient_rising_flank import (
 DEFAULT_INPUT_DIR = Path("outputs/motorneurons")
 DEFAULT_OUTPUT_DIR = Path("outputs/chen_comparison")
 DEFAULT_CHEN_MATRIX_MANIFEST = Path("outputs/chen_direct_matrices/manifest.csv")
-DEFAULT_LPCMCI_INPUT_DIR = Path("outputs/revision_campaign/motorneurons_lpcmci")
-DEFAULT_OASIS_INPUT_DIR = Path("outputs/revision_campaign/motorneurons_oasis")
+DEFAULT_LPCMCI_INPUT_DIR = Path("outputs/validation_campaign/motorneurons_lpcmci")
+DEFAULT_OASIS_INPUT_DIR = Path("outputs/validation_campaign/motorneurons_oasis")
 CHEN_W_IC = 1.0
 
 MOTONEURON_SUMMARY_FILES = (

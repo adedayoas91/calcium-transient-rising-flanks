@@ -1,8 +1,8 @@
 {
-  "input_dir": "outputs/validation_results",
-  "n_rows": 500,
-  "n_summary_rows": 60,
-  "n_contrast_rows": 36,
+  "input_dir": "/Users/sadiq.adedayo/Documents/projects/others/calcium-transient-rising-flanks/outputs/validation_results",
+  "n_rows": 11700,
+  "n_summary_rows": 160,
+  "n_contrast_rows": 128,
   "grid_filenames": [
     "dynamic_grid_runs.csv",
     "grid_runs.csv"

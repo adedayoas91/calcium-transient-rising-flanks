@@ -1,0 +1,39 @@
+{
+  "completed_units": 72,
+  "config": {
+    "alpha": 0.05,
+    "cases": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "data_dir": "data/motoneurons",
+    "event_mode": "physical",
+    "fdr": true,
+    "include_leave_one_neuron": true,
+    "include_leave_one_transient": true,
+    "max_lag": 1,
+    "methods": [
+      "cgc",
+      "cgc-star"
+    ],
+    "n_estimator_surrogates": 0,
+    "n_event_bootstrap": 20,
+    "recordings": "all",
+    "representations": [
+      "full",
+      "deconvolved",
+      "rise",
+      "fall",
+      "fall_residual"
+    ],
+    "score_threshold": 0.0,
+    "seed": 0,
+    "window_length": 120,
+    "window_step": null
+  },
+  "config_digest": "970983b93825b27e",
+  "status": "complete",
+  "total_units": 72
+}

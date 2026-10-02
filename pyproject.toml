@@ -14,6 +14,7 @@ dependencies = [
 pag = [
     "joblib>=1.2.0",
     "numba>=0.64.0",
+    "scipy>=1.16.0",
     "tigramite>=5.2.10.1",
 ]
 deconvolution = [

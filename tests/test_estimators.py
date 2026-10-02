@@ -197,6 +197,28 @@ class EstimatorTests(unittest.TestCase):
         self.assertEqual(corrected[0, 1], 0.1)
         self.assertEqual(corrected[1, 1], 1.0)
 
+    def test_graph_adapter_applies_finite_sample_permutation_correction(self) -> None:
+        core = SimpleNamespace(
+            data=np.zeros((2, 20)),
+            inv_corr_=np.ones((4, 2)),
+            pVal_corr_=np.ones((4, 2)),
+            pVal_inv_corr_=np.ones((4, 2)),
+            pair_diagnostics_=None,
+        )
+        core.pVal_corr_[2, 1] = 0.0
+        core.pVal_inv_corr_[2, 1] = 0.0
+        estimator = CausalisedGC(
+            max_lag=1,
+            n_surrogates=9,
+            alpha=0.2,
+            fdr=False,
+        )
+
+        result = estimator._graph_from_core(core, physical=False)
+
+        self.assertEqual(result.p_values[0, 1], 0.1)
+        self.assertTrue(result.adjacency[0, 1])
+
     def test_unadjusted_cgc_applies_separate_alpha_and_beta_thresholds(self) -> None:
         core = SimpleNamespace(
             data=np.zeros((2, 20)),
@@ -211,7 +233,7 @@ class EstimatorTests(unittest.TestCase):
         core.pVal_inv_corr_[3, 0] = 0.0005
         estimator = CausalisedGC(
             max_lag=1,
-            n_surrogates=10,
+            n_surrogates=9999,
             alpha=0.01,
             beta=0.001,
             fdr=False,
@@ -298,6 +320,36 @@ class EstimatorTests(unittest.TestCase):
         self.assertEqual(cgc_star.estimator, "cgc_star")
         self.assertEqual(cgc.scores.shape, (3, 3))
         self.assertFalse(np.any(np.diag(cgc_star.adjacency)))
+
+    def test_cross_representation_fit_uses_source_and_target_arrays(self) -> None:
+        rng = np.random.default_rng(24)
+        source = rng.normal(size=(3, 400))
+        outcome = rng.normal(scale=0.1, size=(3, 400))
+        outcome[1, 1:] += 1.5 * source[0, :-1]
+
+        result = CausalisedGC(
+            max_lag=1,
+            n_pasts=2,
+            score_threshold=0.05,
+            method="cgc",
+        ).fit(source, outcomes=outcome)
+
+        self.assertEqual(result.estimator, "cross_representation_cgc")
+        self.assertTrue(result.adjacency[0, 1])
+        self.assertGreater(result.scores[0, 1], result.scores[1, 0])
+
+    def test_cross_representation_fit_validates_shape_and_selection(self) -> None:
+        estimator = CausalisedGC(max_lag=1, event_mode="physical")
+        data = np.ones((2, 20))
+
+        with self.assertRaisesRegex(ValueError, "outcomes must match"):
+            estimator.fit(data, outcomes=np.ones((3, 20)))
+        with self.assertRaisesRegex(NotImplementedError, "complete physical"):
+            estimator.fit(
+                data,
+                outcomes=data,
+                event_indices=(np.arange(20), np.arange(20)),
+            )
 
     def test_cgc_star_alias_is_supported_by_supplied_core(self) -> None:
         GcStar = _load_gcstar_class()

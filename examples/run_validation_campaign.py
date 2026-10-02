@@ -1,4 +1,4 @@
-"""Run the complete revision experiment campaign in dependency order.
+"""Run the complete validation experiment campaign in dependency order.
 
 Every scientific stage is invoked with its own ``--resume`` flag.  This driver
 also skips only outputs whose ``summary.json`` explicitly reports
@@ -19,7 +19,7 @@ from calcium_transient_rising_flank.checkpointing import format_progress
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT_ROOT = Path("outputs/revision_campaign")
+DEFAULT_OUTPUT_ROOT = Path("outputs/validation_campaign")
 CAMPAIGN_STAGES = (
     "empirical_fdr_bh",
     "empirical_fdr_unadjusted",

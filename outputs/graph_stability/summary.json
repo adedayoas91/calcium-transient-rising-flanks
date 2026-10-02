@@ -1,8 +1,10 @@
 {
-  "input_dir": "outputs/motorneurons",
-  "n_graph_rows": 40,
-  "n_overlap_rows": 13,
-  "n_stability_rows": 16,
+  "input_dir": "/Users/sadiq.adedayo/Documents/projects/others/calcium-transient-rising-flanks/outputs/motorneurons",
+  "lpcmci_input_dir": "/Users/sadiq.adedayo/Documents/projects/others/calcium-transient-rising-flanks/outputs/validation_campaign/motorneurons_lpcmci",
+  "oasis_input_dir": "/Users/sadiq.adedayo/Documents/projects/others/calcium-transient-rising-flanks/outputs/validation_campaign/motorneurons_oasis",
+  "n_graph_rows": 84,
+  "n_overlap_rows": 132,
+  "n_stability_rows": 28,
   "outputs": [
     "graph_support_rows.csv",
     "representation_overlaps.csv",

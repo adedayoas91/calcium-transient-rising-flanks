@@ -65,6 +65,15 @@ def falling_flank(
     return result
 
 
+def signed_difference(traces: np.ndarray) -> np.ndarray:
+    """Return first differences without discarding negative changes."""
+
+    values = validate_traces(traces)
+    result = np.zeros_like(values)
+    result[:, 1:] = np.diff(values, axis=1)
+    return result
+
+
 def estimate_decay(traces: np.ndarray, default: float = 0.95) -> np.ndarray:
     """Estimate an AR(1) persistence parameter from declining samples.
 
@@ -104,6 +113,24 @@ def deconvolve_ar1(
         values[:, 1:] - decay[:, None] * values[:, :-1], 0.0
     )
     return events
+
+
+def signed_ar1_innovation(
+    traces: np.ndarray,
+    gamma: float | np.ndarray | None = None,
+) -> np.ndarray:
+    """Return AR(1) innovations without nonnegative rectification."""
+
+    values = validate_traces(traces)
+    decay = estimate_decay(values) if gamma is None else _per_roi_parameter(
+        gamma, values.shape[0], "gamma"
+    )
+    if np.any((decay < 0) | (decay >= 1)):
+        raise ValueError("gamma values must lie in [0, 1)")
+    innovations = np.zeros_like(values)
+    innovations[:, 0] = values[:, 0]
+    innovations[:, 1:] = values[:, 1:] - decay[:, None] * values[:, :-1]
+    return innovations
 
 
 def decay_null_residual(
