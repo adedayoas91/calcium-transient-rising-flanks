@@ -34,9 +34,9 @@ class DynamicExtensionsScriptTests(unittest.TestCase):
 
     def test_dynamic_conditions_include_explicit_causal_fall_truth(self) -> None:
         script = _load_script_module()
-        _, rise_sequence, fall_sequence = script._truth_graphs()
+        _, rise_sequence, fall_sequence = script.dynamic_truth_graphs()
 
-        conditions = script._dynamic_conditions(rise_sequence, fall_sequence)
+        conditions = script.dynamic_conditions(rise_sequence, fall_sequence)
         by_name = {condition.name: condition for condition in conditions}
 
         causal = by_name["dynamic_b_hybrid_causal_fall_overlap"].dynamic_config

@@ -27,7 +27,6 @@ SHD = None
 SID = None
 
 
-@jit(nopython=True)
 def _perm_test_numba(x: np.ndarray, y: np.ndarray, n_perm: int) -> float:
     """Compute a circular-shift permutation p-value for correlation.
 
@@ -38,20 +37,30 @@ def _perm_test_numba(x: np.ndarray, y: np.ndarray, n_perm: int) -> float:
     if x.size <= 1 or y.size <= 1 or n_perm <= 0:
         return 1.0
 
-    count = 0
-    corr_obs = np.corrcoef(x, y)[1, 0]
-    x_copy = x.copy()
-    low = 1
-    high = x.size
+    x_centered = np.asarray(x, dtype=float) - np.mean(x)
+    y_centered = np.asarray(y, dtype=float) - np.mean(y)
+    denominator = np.sqrt(
+        np.dot(x_centered, x_centered) * np.dot(y_centered, y_centered)
+    )
+    if not np.isfinite(denominator) or denominator <= 0.0:
+        return 0.0
 
-    for _ in range(n_perm):
-        shift = np.random.randint(low, high)
-        rolled = np.hstack((x_copy[shift:], x_copy[:shift]))
-        corr_perm = np.corrcoef(rolled, y)[1, 0]
-        if np.abs(corr_perm) >= np.abs(corr_obs):
-            count += 1
-
-    return count / n_perm
+    # A circular shift preserves the centered norm.  Compute the correlation
+    # at every distinct shift once with a circular cross-correlation, then draw
+    # the same with-replacement Monte Carlo shifts as the original loop.  This
+    # is numerically equivalent but avoids rebuilding a rolled vector and a
+    # 2x2 covariance matrix for every surrogate.
+    circular_products = np.fft.ifft(
+        np.fft.fft(x_centered) * np.conj(np.fft.fft(y_centered))
+    ).real
+    correlations = circular_products / denominator
+    shifts = np.random.randint(1, x.size, size=n_perm)
+    return float(
+        np.count_nonzero(
+            np.abs(correlations[shifts]) >= np.abs(correlations[0])
+        )
+        / n_perm
+    )
 
 
 def regression_residual(x: np.ndarray, z: np.ndarray) -> np.ndarray:

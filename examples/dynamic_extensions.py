@@ -125,7 +125,10 @@ def _parse_grid(value: str) -> tuple[EstimatorGridSpec, ...]:
     return tuple(GRID_SPECS[name] for name in names)
 
 
-def _truth_graphs() -> tuple[np.ndarray, tuple[np.ndarray, ...], tuple[np.ndarray, ...]]:
+def dynamic_truth_graphs() -> tuple[
+    np.ndarray, tuple[np.ndarray, ...], tuple[np.ndarray, ...]
+]:
+    """Return the declared rise union and episode-specific rise/fall graphs."""
     rise_a = np.array(
         [
             [False, True, False, False, False],
@@ -172,10 +175,11 @@ def _active_node_sequence() -> tuple[np.ndarray, ...]:
     )
 
 
-def _dynamic_conditions(
+def dynamic_conditions(
     rise_sequence: tuple[np.ndarray, ...],
     fall_sequence: tuple[np.ndarray, ...],
 ) -> tuple[SyntheticCondition, ...]:
+    """Return the three declared physical-time dynamic stress conditions."""
     common = {
         "n_episodes": 4,
         "min_rise_length": 24,
@@ -260,11 +264,15 @@ def _dynamic_metadata(run) -> dict[str, float | int | bool | str | None]:
     if run.dataset.propagated_events is not None:
         for episode in episodes:
             fall_propagated += float(
-                run.dataset.propagated_events[:, episode.fall_start : episode.fall_stop].sum()
+                run.dataset.propagated_events[
+                    :, episode.fall_start : episode.fall_stop
+                ].sum()
             )
     return {
         "n_episodes": len(episodes),
-        "fall_truth_edges": 0 if fall_truth is None else int(np.count_nonzero(fall_truth)),
+        "fall_truth_edges": 0
+        if fall_truth is None
+        else int(np.count_nonzero(fall_truth)),
         "fall_propagated_total": fall_propagated,
         "fall_overlap_exclusion_samples": (
             None
@@ -386,9 +394,7 @@ def _summary_rows(
         }
         for metric in SUMMARY_METRICS:
             samples = [
-                float(value)
-                for row in values
-                if (value := row.get(metric)) is not None
+                float(value) for row in values if (value := row.get(metric)) is not None
             ]
             entry[f"{metric}_mean"] = float(np.mean(samples)) if samples else None
         summaries.append(entry)
@@ -402,9 +408,9 @@ def _contrast_rows(
         tuple[str, str, str], dict[str, dict[str, float | int | bool | str | None]]
     ] = defaultdict(dict)
     for row in summaries:
-        by_group[
-            (str(row["method"]), str(row["grid"]), str(row["condition"]))
-        ][str(row["representation"])] = row
+        by_group[(str(row["method"]), str(row["grid"]), str(row["condition"]))][
+            str(row["representation"])
+        ] = row
 
     contrasts: list[dict[str, float | int | bool | str | None]] = []
     for (method, grid, condition), representation_rows in sorted(by_group.items()):
@@ -431,7 +437,9 @@ def _contrast_rows(
     return contrasts
 
 
-def _write_csv(path: Path, rows: list[dict[str, float | int | bool | str | None]]) -> None:
+def _write_csv(
+    path: Path, rows: list[dict[str, float | int | bool | str | None]]
+) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     if not rows:
         temporary.write_text("", encoding="utf-8")
@@ -474,7 +482,9 @@ def _read_grid_rows(path: Path) -> list[dict[str, float | int | bool | str | Non
         return [_coerce_grid_row(row) for row in csv.DictReader(file)]
 
 
-def _row_run_key(row: dict[str, float | int | bool | str | None]) -> tuple[str, str, str, int]:
+def _row_run_key(
+    row: dict[str, float | int | bool | str | None],
+) -> tuple[str, str, str, int]:
     method = row.get("method")
     grid = row.get("grid")
     condition = row.get("condition")
@@ -651,8 +661,8 @@ def main() -> None:
     args = parse_args()
     methods = _parse_methods(args.methods)
     specs = _parse_grid(args.grid)
-    adjacency, rise_sequence, fall_sequence = _truth_graphs()
-    conditions = _dynamic_conditions(rise_sequence, fall_sequence)
+    adjacency, rise_sequence, fall_sequence = dynamic_truth_graphs()
+    conditions = dynamic_conditions(rise_sequence, fall_sequence)
     seeds = tuple(range(args.seed_start, args.seed_start + args.n_seeds))
     if not seeds:
         raise ValueError("n_seeds must be positive")

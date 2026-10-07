@@ -1,6 +1,6 @@
 # Notebook Execution Order
 
-Run notebooks from the `calcium-transient-rising-flank` package root so relative paths resolve cleanly. The lowercase LPCMCI, OASIS, PCMCI+, and VAR-Granger notebooks are ready to execute results by default. Other preview-oriented wrappers retain their documented disabled launch toggles.
+Run notebooks from the `calcium-transient-rising-flank` package root so relative paths resolve cleanly. The c-GC, c-GC*, LPCMCI, OASIS, PCMCI+, and VAR-Granger method notebooks are ready to execute their declared result arms by default. Other preview-oriented wrappers retain their documented disabled launch toggles.
 
 ## Validation Campaign (Recommended Next Run)
 
@@ -86,14 +86,18 @@ Use these when a scheduler or failure requires running one family at a time:
 1. `notebooks/motorneurons/fdr_reestimation.ipynb`
 2. `notebooks/simulations/05_calibration_onset_run.ipynb`
 3. `notebooks/simulations/06_dynamic_extensions_run.ipynb`
-4. `notebooks/simulations/lpcmci.ipynb`
-5. `notebooks/simulations/oasis.ipynb`
-6. `notebooks/motorneurons/lpcmci.ipynb`
-7. `notebooks/motorneurons/oasis.ipynb`
+4. `notebooks/simulations/c-GC.ipynb`
+5. `notebooks/simulations/c-GC-star.ipynb`
+6. `notebooks/simulations/lpcmci.ipynb`
+7. `notebooks/simulations/oasis.ipynb`
 8. `notebooks/simulations/pcmciplus.ipynb`
 9. `notebooks/simulations/var_granger.ipynb`
-10. `notebooks/motorneurons/pcmciplus.ipynb`
-11. `notebooks/motorneurons/var_granger.ipynb`
+10. `notebooks/motorneurons/c-GC_Motoneurons.ipynb`
+11. `notebooks/motorneurons/c-GC-star_Motoneurons.ipynb`
+12. `notebooks/motorneurons/lpcmci.ipynb`
+13. `notebooks/motorneurons/oasis.ipynb`
+14. `notebooks/motorneurons/pcmciplus.ipynb`
+15. `notebooks/motorneurons/var_granger.ipynb`
 
 PCMCI+ is the faster Tigramite comparator for autocorrelated series under
 causal sufficiency. VAR-Granger supplies the prespecified nested-model
@@ -101,18 +105,138 @@ F-test baseline. Both runners include static and episodic simulations, signed
 input representations, raw method artifacts, and independent resumable output
 roots. They do not depend on the incomplete LPCMCI campaign.
 
-The method-validation cross-representation, signed-input, threshold, finite-
-permutation, and conditioning-depth analyses are run separately:
+The legacy method-validation helper remains available for threshold, finite-
+permutation, and conditioning-depth diagnostics:
 
 ```bash
 PYTHONPATH=src .venv/bin/python examples/run_method_validation_analyses.py
 ```
 
-Use `--components` to run `cross`, `signed`, `depth`, `threshold`, or
-`permutation` independently. These analyses do not require LPCMCI output.
+Use `--components` to select a diagnostic. Its older `cross` and `signed`
+components are development checks for c-GC/c-GC* only; the publication-scale
+four-method rectification and cross-representation analyses are now launched
+from the existing method notebooks as described below.
+
+### Matched physical-time and confounding analyses
+
+The existing method notebooks now expose a common lag-1 design and are ready to
+run top to bottom. Run them in this order:
+
+1. `notebooks/simulations/c-GC.ipynb`: runs c-GC at `n_pasts=1,2,3`, the
+   pair-level compressed-versus-physical effective-sample audit, confounding
+   sensitivity, and the representation-bias audits. It first creates the
+   resumable c-GC/c-GC* episodic grid required by that audit.
+2. `notebooks/simulations/c-GC-star.ipynb`: runs the corresponding c-GC* arms.
+3. `notebooks/simulations/lpcmci.ipynb`: runs the PAG-based latent-confounding
+   comparator; `RUN_CONFOUNDING_SENSITIVITY` is enabled by default.
+4. `notebooks/simulations/pcmciplus.ipynb`: runs PCMCI+ on the matched matrices
+   and executes its H1--H4 sections.
+5. `notebooks/simulations/var_granger.ipynb`: runs conditional VAR-Granger on
+   the matched matrices and executes its H1--H4 sections.
+
+The older `06_dynamic_extensions_run.ipynb` launch cells remain available for
+scheduler-specific execution, but they are no longer required for a complete
+method-notebook run. The c-GC, c-GC*, LPCMCI, PCMCI+, and VAR-Granger notebooks
+launch their relevant matched arms by default.
+All five algorithms receive identical per-seed observed matrices. Directed
+recovery remains the estimand for c-GC/c-GC*, PCMCI+, and VAR-Granger; the
+cross-method confounding figure uses a common lagged-skeleton estimand because
+LPCMCI returns a PAG. Its raw PAG is retained, and the skeleton projection is
+explicitly labelled as lossy.
+
+The dynamic analysis writes:
+
+- `outputs/matched_dynamic_benchmark/analysis/matched_dynamic_four_learner_f1.pdf`
+- `outputs/matched_dynamic_benchmark/analysis/cgc_conditioning_depth_sensitivity.pdf`
+- `outputs/matched_dynamic_benchmark/analysis/selection_effective_support_tradeoff.pdf`
+- paired metric, cross-method, conditioning-depth, effective-support, and
+  selection-tradeoff CSV files;
+- `analysis-report.md`, `stats-appendix.md`, and `figure-catalog.md`.
+
+The confounding analysis writes its PAG-aware outputs under
+`outputs/matched_confounding_benchmark/analysis/`. The hidden-driver condition
+adds an unobserved sixth node with lagged edges to two observed nodes; it is
+kept distinct from common observation noise. Its strict bundle includes paired
+degradation estimates with bootstrap intervals, sign-flip tests with Holm
+correction, the degradation figure, an analysis report, a statistical
+appendix, and a figure catalog. An artifact-level mechanism table and figure
+also track the absent adjacency between the two observed nodes sharing the
+hidden parent, with native and shared-noise controls and counts of all other
+false skeleton adjacencies.
+
+The episodic selection audit writes its strict bundle under
+`outputs/method_validation/episodic_effective_samples/`. The paired table
+reports physical-time minus compressed-mode differences in recovery and usable
+lag-pair support. Its sample audit uses `n_pasts=1`, matching the primary
+episodic recovery grid. These are sensitivity contrasts, not a claim that the
+two time axes define the same estimand. Both c-GC notebooks invoke the same
+resumable grid command, so the second invocation verifies and reuses completed
+units rather than recomputing them.
+
+For motoneurons, run the matched arms in the existing
+`c-GC_Motoneurons.ipynb`, `c-GC-star_Motoneurons.ipynb`, `pcmciplus.ipynb`, and
+`var_granger.ipynb` notebooks. All use cases C/D, recordings F3T1/F3T2/F5T2,
+rise/fall matrices, and physical lag 1. The empirical analysis reports graph
+density and bilateral summaries, not recovery accuracy, because edge truth is
+unavailable. It produces descriptive paired contrasts, an analysis report,
+statistical appendix, and figure catalog. No p-values are assigned to these
+recording-level summaries because the available recordings and preprocessing
+cases are not treated as independent biological replicates.
+
+### Rectification and cross-representation reviewer audits
+
+Run the existing four simulation notebooks in this order so the final notebook
+can trigger the common analysis:
+
+1. `notebooks/simulations/c-GC.ipynb`
+2. `notebooks/simulations/c-GC-star.ipynb`
+3. `notebooks/simulations/pcmciplus.ipynb`
+4. `notebooks/simulations/var_granger.ipynb`
+
+Their `RUN_REVIEWER_AUDITS = True` cells write resumable method-specific rows
+under `outputs/representation_bias_benchmark/simulations/`. Each method receives
+the same 20 seeds and 1,500-frame traces. The signed-information arm compares
+the nonnegative AR(1) innovation directly with its paired signed innovation,
+plus full, rise, fall, and signed-difference inputs. Its declared conditions are
+an excitatory control, mixed lag-one excitation/inhibition, and a biphasic
+post-inhibitory-rebound stress test with a negative lag-one and positive lag-two
+effect on the same directed links. The lag-specific recall outputs measure
+support plus selected-lag localization, not formal edge-sign recovery; the
+linear biphasic condition is a stress test rather than a complete biophysical
+rebound model.
+
+The cross-representation arm tests the fixed estimand
+`fall_residual_i(t-1) -> rise_j(t)` on dynamic-A. Dynamic-A declares no
+fall-to-rise cross-phase graph, so off-diagonal retained cross-block links are
+scored as false positives. c-GC/c-GC* use their source/outcome interface;
+PCMCI+ and VAR use a joint source/target system and retain only the lag-one
+source-to-target block. The ordinary rise graph is retained only as contextual
+recovery calibration. It is not contrasted with the cross-representation fit,
+because those fits have different estimands and conditioning systems. Across
+methods, the source/target inputs and lag-one cross-block estimand are matched,
+but each algorithm retains its native conditioning system.
+
+After all four methods complete, the common analyzer writes strict summaries,
+paired bootstrap intervals and Holm-corrected sign-flip tests for the matched
+signed-versus-rectified contrast, plus a standalone cross-representation
+falsification figure under
+`outputs/representation_bias_benchmark/simulations/analysis/`.
+
+The four existing motor-neuron notebooks contain the corresponding default-on
+audit cells and write to `outputs/representation_bias_benchmark/motorneurons/`.
+These compare graph stability and density for signed versus rectified inputs and
+report the fall-residual-to-rise fit separately. They do not report inhibitory,
+rebound, or cross-phase accuracy because the recordings have no graph truth;
+preprocessing cases and repeated recordings are not treated as independent
+biological replicates for p-values. The audit requests 6,000 c-GC/c-GC*
+surrogates so the finite Monte Carlo p-value grid is fine enough for BH
+correction for F5T2's 17 ROIs (the exact first-rank minimum is 5,439);
+PCMCI+ and VAR ignore that argument.
 
 Every heavy launch command in these notebooks contains `--resume`; there is no
-notebook toggle that disables checkpoint reuse. The mixed-fall and hybrid grids
+notebook toggle that disables checkpoint reuse. Checkpoints include the base
+random seed and an empirical-input fingerprint, so changed seeds or motor-neuron
+data cannot silently reuse earlier rows. The mixed-fall and hybrid grids
 write to separate directories, as do threshold calibration and adaptive onset,
 so later stages cannot overwrite earlier evidence.
 
@@ -133,10 +257,17 @@ root contains `input_manifest.csv`; matching unit keys must have identical
 `input_digest` values before results are compared. The c-GC/c-GC* static input
 manifests and motorneuron summary rows expose the same digests.
 
-The PCMCI+ and VAR-Granger notebooks use a smaller method-comparison grid by
-default: eight seeds, 1,500 frames, native/shared-input static simulations, and
-the episodic simulation. Their CLI settings are recorded in each output
-`summary.json` and can be increased before the publication run.
+The PCMCI+ and VAR-Granger notebooks now use 20 seeds, 1,500 frames, the three
+declared dynamic conditions, five common full-axis representations, and a
+maximum lag of one. Each also runs its complete H1--H4 diagnostic family. Their
+separate confounding arms cover native observations, shared observation noise,
+and an explicit hidden common driver on the same observed topology.
+H3 uses 99 cyclic shifts so its two prespecified empirical-null tests retain
+enough p-value resolution after Holm correction. Reverse time and the falling
+comparator are falsification controls, not members of that empirical null.
+H4 uses 20 paired seeds for each robustness setting. The H1--H4 analyzer writes
+summary and paired-contrast CSV files, PNG and PDF figures,
+`analysis-report.md`, `stats-appendix.md`, and `figure-catalog.md`.
 
 The matched empirical runner also writes
 `observed_graph_artifacts_manifest.json` and compressed `.npz` files under each
@@ -329,7 +460,7 @@ Set `TAU = None` to preserve the existing merged-`N_LAGS` behavior, or set `TAU`
 The LPCMCI and OASIS notebooks use separate resumable output roots and can run
 in parallel. LPCMCI preserves raw PAG tensors and reports its lagged skeleton
 only as a lossy support projection. OASIS reports event recovery and downstream
-c-GC/c-GC* recovery; it is not labeled as a causal learner. Both regenerate the
+c-GC/c-GC* recovery; it is not labeled as a causal discovery algorithm. Both regenerate the
 same static grid consumed by `c-GC.ipynb` and `c-GC-star.ipynb`, and both emit
 per-unit input digests for an exact equality check. Their downstream c-GC/c-GC*
 fits use the same reference settings: 1,000 permutations, `n_pasts=2`,
@@ -483,7 +614,7 @@ metadata in `outputs/motorneurons/temporal_screen_manual/experiment-log.md`.
 The empirical screen is truth-free and ran no c-GC or c-GC*. Its result is a
 no-go for applying a temporal hard mask or soft prior to the primary empirical
 graphs. The two population-bout passes may support only an explicitly
-exploratory, segmentation-sensitive learner comparison; they are not evidence
+exploratory, segmentation-sensitive algorithm comparison; they are not evidence
 of causal connectivity.
 
 ## Optional Smoke Checks

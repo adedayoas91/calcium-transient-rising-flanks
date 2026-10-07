@@ -578,6 +578,112 @@ def summarize_recovery(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return summaries
 
 
+def _bootstrap_mean_ci(
+    values: np.ndarray, rng: np.random.Generator, n_bootstrap: int
+) -> tuple[float, float]:
+    if values.size == 1:
+        return float(values[0]), float(values[0])
+    draws = rng.choice(values, size=(n_bootstrap, values.size), replace=True).mean(1)
+    lower, upper = np.quantile(draws, (0.025, 0.975))
+    return float(lower), float(upper)
+
+
+def _sign_flip_pvalue(
+    differences: np.ndarray, rng: np.random.Generator, n_permutations: int
+) -> float:
+    observed = abs(float(np.mean(differences)))
+    signs = rng.choice((-1.0, 1.0), size=(n_permutations, differences.size))
+    null = np.abs(np.mean(signs * differences, axis=1))
+    return float((1 + np.count_nonzero(null >= observed)) / (n_permutations + 1))
+
+
+def _holm_adjust(p_values: list[float]) -> list[float]:
+    order = np.argsort(np.asarray(p_values, dtype=float))
+    adjusted: np.ndarray = np.empty(len(p_values), dtype=float)
+    running = 0.0
+    total = len(p_values)
+    for rank, index in enumerate(order):
+        running = max(running, (total - rank) * p_values[index])
+        adjusted[index] = min(1.0, running)
+    return adjusted.tolist()
+
+
+def paired_mode_contrasts(
+    rows: list[dict[str, Any]],
+    *,
+    n_bootstrap: int,
+    n_permutations: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    """Compare physical minus compressed time on identical simulation seeds."""
+
+    metrics = (
+        "f1",
+        "usable_samples_pair_median",
+        "ar1_effective_sample_proxy_pair_median",
+        "insufficient_pair_fraction",
+    )
+    indexed: dict[
+        tuple[str, str, str], dict[str, dict[int, dict[str, Any]]]
+    ] = defaultdict(lambda: defaultdict(dict))
+    for row in rows:
+        group = (
+            str(row["condition"]),
+            str(row["method"]),
+            str(row["representation"]),
+        )
+        indexed[group][str(row["event_mode"])][int(row["seed"])] = row
+
+    rng = np.random.default_rng(seed)
+    output: list[dict[str, Any]] = []
+    for (condition, method, representation), modes in sorted(indexed.items()):
+        compressed_seeds = set(modes["compressed"])
+        if compressed_seeds != set(modes["physical"]):
+            raise ValueError(
+                f"unpaired event modes for {condition}, {method}, {representation}"
+            )
+        for metric in metrics:
+            differences = np.asarray(
+                [
+                    float(modes["physical"][unit_seed][metric])
+                    - float(modes["compressed"][unit_seed][metric])
+                    for unit_seed in sorted(compressed_seeds)
+                ],
+                dtype=float,
+            )
+            lower, upper = _bootstrap_mean_ci(differences, rng, n_bootstrap)
+            mean = float(np.mean(differences))
+            std = (
+                float(np.std(differences, ddof=1))
+                if differences.size > 1
+                else 0.0
+            )
+            output.append(
+                {
+                    "condition": condition,
+                    "method": method,
+                    "representation": representation,
+                    "contrast": "physical_minus_compressed",
+                    "metric": metric,
+                    "n_pairs": differences.size,
+                    "mean_paired_difference": mean,
+                    "std_paired_difference": std,
+                    "ci_lower": lower,
+                    "ci_upper": upper,
+                    "standardized_mean_difference": (
+                        mean / std if std > 0.0 else None
+                    ),
+                    "p_value": _sign_flip_pvalue(
+                        differences, rng, n_permutations
+                    ),
+                }
+            )
+    adjusted = _holm_adjust([float(row["p_value"]) for row in output])
+    for row, p_adjusted in zip(output, adjusted):
+        row["p_holm"] = p_adjusted
+    return output
+
+
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = sorted({key for row in rows for key in row})
@@ -587,7 +693,14 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
-def _plot(sample_rows: list[dict[str, Any]], joined: list[dict[str, Any]], path: Path) -> None:
+def _plot(
+    sample_rows: list[dict[str, Any]],
+    joined: list[dict[str, Any]],
+    path: Path,
+    *,
+    n_bootstrap: int,
+    seed: int,
+) -> None:
     selected = [
         row
         for row in sample_rows
@@ -603,37 +716,66 @@ def _plot(sample_rows: list[dict[str, Any]], joined: list[dict[str, Any]], path:
     modes = ("compressed", "physical")
     colors = {"compressed": "#b45f06", "physical": "#2f6f8f"}
     figure, axes = plt.subplots(1, 2, figsize=(7.2, 3.2))
-    sample_means = [
-        np.mean(
+    rng = np.random.default_rng(seed)
+    sample_arrays = [
+        np.asarray(
             [
                 row["ar1_effective_sample_proxy_pair_median"]
                 for row in selected
                 if row["event_mode"] == mode
-            ]
+            ],
+            dtype=float,
         )
         for mode in modes
     ]
-    axes[0].bar(modes, sample_means, color=[colors[mode] for mode in modes])
+    sample_means = np.asarray([np.mean(values) for values in sample_arrays])
+    sample_intervals = [
+        _bootstrap_mean_ci(values, rng, n_bootstrap) for values in sample_arrays
+    ]
+    axes[0].bar(
+        modes,
+        sample_means,
+        yerr=np.asarray(
+            [
+                sample_means - np.asarray([item[0] for item in sample_intervals]),
+                np.asarray([item[1] for item in sample_intervals]) - sample_means,
+            ]
+        ),
+        capsize=3,
+        color=[colors[mode] for mode in modes],
+    )
     axes[0].set_ylabel("Median AR(1)-adjusted sample proxy")
     axes[0].set_title("Rise sample support")
 
     x: np.ndarray = np.arange(2, dtype=float)
     width = 0.34
     for index, mode in enumerate(modes):
-        values = [
-            np.mean(
+        arrays = [
+            np.asarray(
                 [
                     row["f1"]
                     for row in recovery
                     if row["event_mode"] == mode and row["method"] == method
-                ]
+                ],
+                dtype=float,
             )
             for method in ("cgc", "cgc-star")
+        ]
+        values = np.asarray([np.mean(array) for array in arrays])
+        intervals = [
+            _bootstrap_mean_ci(array, rng, n_bootstrap) for array in arrays
         ]
         axes[1].bar(
             x + (index - 0.5) * width,
             values,
             width=width,
+            yerr=np.asarray(
+                [
+                    values - np.asarray([item[0] for item in intervals]),
+                    np.asarray([item[1] for item in intervals]) - values,
+                ]
+            ),
+            capsize=3,
             label=mode,
             color=colors[mode],
         )
@@ -648,6 +790,42 @@ def _plot(sample_rows: list[dict[str, Any]], joined: list[dict[str, Any]], path:
     plt.close(figure)
 
 
+def _plot_tradeoff(rows: list[dict[str, Any]], path: Path) -> None:
+    selected = [
+        row
+        for row in rows
+        if row["condition"] == "dynamic_a_noncausal_fall"
+        and row["representation"] == "rise"
+    ]
+    colors = {"compressed": "#E69F00", "physical": "#0072B2"}
+    markers = {"cgc": "o", "cgc-star": "s"}
+    figure, axis = plt.subplots(figsize=(5.6, 4.2))
+    for method in ("cgc", "cgc-star"):
+        for mode in ("compressed", "physical"):
+            group = [
+                row
+                for row in selected
+                if row["method"] == method and row["event_mode"] == mode
+            ]
+            axis.scatter(
+                [row["ar1_effective_sample_proxy_pair_median"] for row in group],
+                [row["f1"] for row in group],
+                color=colors[mode],
+                marker=markers[method],
+                alpha=0.72,
+                label=f"{method}, {mode}",
+            )
+    axis.set_xlabel("Median AR(1)-adjusted sample proxy")
+    axis.set_ylabel("Union-truth F1")
+    axis.set_ylim(-0.02, 1.02)
+    axis.grid(color="#dddddd", linewidth=0.7)
+    axis.legend(frameon=False, fontsize=8)
+    figure.tight_layout()
+    figure.savefig(path.with_suffix(".png"), dpi=300, bbox_inches="tight")
+    figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
+    plt.close(figure)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--grid-path", type=Path, default=DEFAULT_GRID_PATH)
@@ -656,7 +834,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-steps", type=int, default=1500)
     parser.add_argument("--n-pasts", type=int, default=3)
     parser.add_argument("--lag", type=int, default=1)
-    return parser.parse_args()
+    parser.add_argument("--n-bootstrap", type=int, default=2000)
+    parser.add_argument("--n-permutations", type=int, default=9999)
+    parser.add_argument("--seed", type=int, default=97)
+    args = parser.parse_args()
+    if args.n_bootstrap < 100 or args.n_permutations < 99:
+        raise SystemExit("use at least 100 bootstrap samples and 99 permutations")
+    return args
 
 
 def main() -> None:
@@ -670,12 +854,26 @@ def main() -> None:
     sample_rows = summarize_samples(pair_rows)
     joined = join_recovery(sample_rows, args.grid_path)
     recovery_summary = summarize_recovery(joined)
+    contrasts = paired_mode_contrasts(
+        joined,
+        n_bootstrap=args.n_bootstrap,
+        n_permutations=args.n_permutations,
+        seed=args.seed,
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(args.output_dir / "episodic_effective_sample_pair_rows.csv", pair_rows)
     _write_csv(args.output_dir / "episodic_effective_sample_rows.csv", sample_rows)
     _write_csv(args.output_dir / "episodic_effective_sample_recovery.csv", joined)
     _write_csv(args.output_dir / "episodic_effective_sample_summary.csv", recovery_summary)
-    _plot(sample_rows, joined, args.output_dir / "episodic_effective_sample_summary")
+    _write_csv(args.output_dir / "episodic_mode_contrasts.csv", contrasts)
+    _plot(
+        sample_rows,
+        joined,
+        args.output_dir / "episodic_effective_sample_summary",
+        n_bootstrap=args.n_bootstrap,
+        seed=args.seed + 1,
+    )
+    _plot_tradeoff(joined, args.output_dir / "episodic_support_recovery_tradeoff")
     dynamic_rise = [
         row
         for row in recovery_summary
@@ -692,6 +890,7 @@ def main() -> None:
         "n_sample_rows": len(sample_rows),
         "n_recovery_rows": len(joined),
         "n_summary_rows": len(recovery_summary),
+        "n_contrast_rows": len(contrasts),
         "episodic_rise_headline": {
             "compressed_usable_samples_pair_median_mean": compressed[
                 "usable_samples_pair_median_mean"
@@ -737,10 +936,56 @@ def main() -> None:
             "episodic_effective_sample_rows.csv",
             "episodic_effective_sample_recovery.csv",
             "episodic_effective_sample_summary.csv",
+            "episodic_mode_contrasts.csv",
             "episodic_effective_sample_summary.png",
             "episodic_effective_sample_summary.pdf",
+            "episodic_support_recovery_tradeoff.png",
+            "episodic_support_recovery_tradeoff.pdf",
+            "analysis-report.md",
+            "stats-appendix.md",
+            "figure-catalog.md",
         ],
     }
+    report = """# Episodic effective-sample analysis
+
+The analysis pairs compressed-event and physical-time fits by simulation seed,
+method, condition, and representation. Exact usable lag-pair counts are reported
+separately from the bounded AR(1)-adjusted effective-sample proxy. Recovery
+changes are evaluated against the same archived truth for each paired seed.
+
+Compression changes the time axis and therefore the causal estimand. The paired
+contrasts quantify the resulting sensitivity and sample-support trade-off; they
+do not establish that either time construction is universally preferable.
+"""
+    (args.output_dir / "analysis-report.md").write_text(report, encoding="utf-8")
+    stats = f"""# Statistical appendix
+
+- Unit of analysis: matched simulation seed (`n={args.n_seeds}`).
+- Contrast: physical time minus compressed event time.
+- Metrics: F1, exact usable lag-pair median, AR(1)-adjusted sample proxy, and
+  insufficient-pair fraction.
+- Uncertainty: percentile bootstrap 95% intervals over paired seeds.
+- Inference: two-sided random sign-flip tests with Holm correction across the
+  complete contrast table.
+- Effect size: paired mean difference standardized by its sample standard deviation.
+- Boundary: the AR(1) quantity is a descriptive proxy, not an independent-sample count.
+"""
+    (args.output_dir / "stats-appendix.md").write_text(stats, encoding="utf-8")
+    catalog = """# Figure catalog
+
+## `episodic_effective_sample_summary.pdf`
+
+- Purpose: compare sample support and archived F1 between compressed and physical time.
+- Error bars: seed-bootstrap 95% intervals.
+- Interpretation: read with `episodic_mode_contrasts.csv`; compression alters the estimand.
+
+## `episodic_support_recovery_tradeoff.pdf`
+
+- Purpose: show seed-level association between effective-support proxy and F1.
+- Points: one matched seed per method and time construction for dynamic-A rise inputs.
+- Interpretation: association is descriptive and does not identify a mechanism.
+"""
+    (args.output_dir / "figure-catalog.md").write_text(catalog, encoding="utf-8")
     (args.output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

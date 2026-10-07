@@ -74,6 +74,37 @@ class EpisodicEffectiveSamplesScriptTests(unittest.TestCase):
         self.assertFalse(row["compressed_estimable"])
         self.assertEqual(row["compressed_usable_samples"], 0)
 
+    def test_mode_contrasts_pair_identical_seeds(self) -> None:
+        rows = []
+        for seed in (1, 2):
+            for mode, offset in (("compressed", 0.0), ("physical", -0.1)):
+                rows.append(
+                    {
+                        "condition": "dynamic_a_noncausal_fall",
+                        "method": "cgc",
+                        "representation": "rise",
+                        "event_mode": mode,
+                        "seed": seed,
+                        "f1": 0.7 + offset,
+                        "usable_samples_pair_median": 20.0 + 10.0 * offset,
+                        "ar1_effective_sample_proxy_pair_median": (
+                            15.0 + 10.0 * offset
+                        ),
+                        "insufficient_pair_fraction": 0.1 - offset,
+                    }
+                )
+
+        contrasts = script.paired_mode_contrasts(
+            rows,
+            n_bootstrap=100,
+            n_permutations=99,
+            seed=5,
+        )
+
+        self.assertEqual(len(contrasts), 4)
+        self.assertTrue(all(row["n_pairs"] == 2 for row in contrasts))
+        self.assertTrue(all("p_holm" in row for row in contrasts))
+
 
 if __name__ == "__main__":
     unittest.main()

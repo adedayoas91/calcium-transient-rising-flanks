@@ -16,7 +16,6 @@ from .estimators import (
 )
 from .metrics import RecoverySummary, edge_recovery, graph_stability
 from .preprocessing import validate_traces
-from .representations import RepresentationBundle
 from .representations import build_representations
 
 
@@ -376,9 +375,17 @@ def generate_static_validation_network(
 
 def _static_moving_average(traces: np.ndarray, window: int) -> np.ndarray:
     if window <= 1:
-        return traces
+        return np.asarray(traces, dtype=float).copy()
     weights = np.ones(int(window), dtype=float) / float(window)
-    return np.vstack([np.convolve(row, weights, mode="same") for row in traces])
+    values = np.asarray(traces, dtype=float)
+    smoothed = np.empty_like(values)
+    start = (window - 1) // 2
+    for roi, row in enumerate(values):
+        full = np.zeros(row.size + window - 1, dtype=float)
+        for offset, weight in enumerate(weights):
+            full[offset : offset + row.size] += row * weight
+        smoothed[roi] = full[start : start + row.size]
+    return smoothed
 
 
 def simulate_static_calcium_like(
@@ -419,13 +426,25 @@ def simulate_static_calcium_like(
             0.2,
             None,
         )
-        calcium[roi] = np.convolve(events[roi] * amplitude, kernel)[:n_steps]
+        # Accumulate each event response in a fixed order.  This avoids the
+        # platform-dependent last-place variation seen in optimized convolution
+        # backends while retaining the same finite impulse-response model.
+        for event_time in np.flatnonzero(events[roi]):
+            stop = min(n_steps, int(event_time) + kernel.size)
+            calcium[roi, event_time:stop] += (
+                amplitude[event_time] * kernel[: stop - int(event_time)]
+            )
     shared = rng.normal(scale=shared_noise_std, size=(1, n_steps))
     noise = rng.normal(scale=noise_std, size=calcium.shape)
     fluorescence = _static_moving_average(
         calcium + shared + noise,
         smooth_window,
     )
+    # ``np.convolve`` can differ by a few last-place bits across repeated calls
+    # on Accelerate-backed NumPy builds.  Canonicalizing well below the
+    # simulated noise scale keeps seeded datasets byte-reproducible, which is
+    # required for exact cross-method input-digest checks.
+    fluorescence = np.round(fluorescence, decimals=12)
     return SyntheticDataset(
         adjacency=np.asarray(adjacency, dtype=bool),
         events=events,

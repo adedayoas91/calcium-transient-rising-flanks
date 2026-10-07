@@ -25,10 +25,16 @@ RUNNER_NOTEBOOKS = {
     },
     "06_dynamic_extensions_run.ipynb": {
         "examples/dynamic_extensions.py",
+        "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_dynamic_benchmark.py",
+        "examples/analyze_matched_confounding_benchmark.py",
+        "examples/analyze_episodic_effective_samples.py",
     },
     "simulations/lpcmci.ipynb": {
         "examples/simulation_baselines.py",
         "examples/simulation_baseline_diagnostics.py",
+        "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_confounding_benchmark.py",
     },
     "simulations/oasis.ipynb": {
         "examples/simulation_baselines.py",
@@ -42,15 +48,53 @@ RUNNER_NOTEBOOKS = {
     },
     "simulations/pcmciplus.ipynb": {
         "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_dynamic_benchmark.py",
+        "examples/analyze_matched_confounding_benchmark.py",
+        "examples/analyze_fast_baseline_hypotheses.py",
+        "examples/run_representation_bias_benchmarks.py",
+        "examples/analyze_representation_bias_benchmarks.py",
+    },
+    "simulations/c-GC.ipynb": {
+        "examples/dynamic_episodic_validation.py",
+        "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_dynamic_benchmark.py",
+        "examples/analyze_matched_confounding_benchmark.py",
+        "examples/analyze_episodic_effective_samples.py",
+    },
+    "simulations/c-GC-star.ipynb": {
+        "examples/dynamic_episodic_validation.py",
+        "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_dynamic_benchmark.py",
+        "examples/analyze_matched_confounding_benchmark.py",
+        "examples/analyze_episodic_effective_samples.py",
     },
     "simulations/var_granger.ipynb": {
         "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_dynamic_benchmark.py",
+        "examples/analyze_matched_confounding_benchmark.py",
+        "examples/analyze_fast_baseline_hypotheses.py",
+        "examples/run_representation_bias_benchmarks.py",
+        "examples/analyze_representation_bias_benchmarks.py",
     },
     "motorneurons/pcmciplus.ipynb": {
         "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_motorneuron_benchmark.py",
+        "examples/run_representation_bias_benchmarks.py",
+        "examples/analyze_representation_bias_benchmarks.py",
     },
     "motorneurons/var_granger.ipynb": {
         "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_motorneuron_benchmark.py",
+        "examples/run_representation_bias_benchmarks.py",
+        "examples/analyze_representation_bias_benchmarks.py",
+    },
+    "motorneurons/c-GC_Motoneurons.ipynb": {
+        "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_motorneuron_benchmark.py",
+    },
+    "motorneurons/c-GC-star_Motoneurons.ipynb": {
+        "examples/run_fast_causal_baselines.py",
+        "examples/analyze_matched_motorneuron_benchmark.py",
     },
     "08_validation_campaign_run.ipynb": {
         "examples/run_validation_campaign.py",
@@ -82,6 +126,9 @@ SAFE_RUN_TOGGLES = {
     "06_dynamic_extensions_run.ipynb": (
         "RUN_MIXED_FALL",
         "RUN_HYBRID",
+        "RUN_MATCHED_FULL_AXIS",
+        "RUN_CONFOUNDING_SENSITIVITY",
+        "RUN_SELECTION_AUDIT",
     ),
     "08_validation_campaign_run.ipynb": ("RUN_CAMPAIGN",),
     "fdr_reestimation.ipynb": ("RUN_BH", "RUN_UNADJUSTED"),
@@ -96,6 +143,10 @@ READY_TO_RUN_TOGGLES = {
     "simulations/var_granger.ipynb": "RUN_VAR_GRANGER",
     "motorneurons/pcmciplus.ipynb": "RUN_PCMCIPLUS",
     "motorneurons/var_granger.ipynb": "RUN_VAR_GRANGER",
+    "simulations/c-GC.ipynb": "RUN_ADDITIONAL_BIAS_AUDITS",
+    "simulations/c-GC-star.ipynb": "RUN_ADDITIONAL_BIAS_AUDITS",
+    "motorneurons/c-GC_Motoneurons.ipynb": "RUN_MATCHED_FULL_AXIS",
+    "motorneurons/c-GC-star_Motoneurons.ipynb": "RUN_MATCHED_FULL_AXIS",
 }
 PORTABLE_RUNNER_NOTEBOOKS = (
     "simulations/05_calibration_onset_run.ipynb",
@@ -252,6 +303,173 @@ class NotebookExecutionContractTests(unittest.TestCase):
             with self.subTest(notebook=relative_path):
                 self.assertRegex(source, rf"\b{re.escape(toggle)}\s*=\s*True\b")
                 self.assertNotIn("--dry-run", source)
+
+    def test_matched_benchmark_notebooks_lock_common_estimands(self) -> None:
+        simulation_paths = (
+            "simulations/06_dynamic_extensions_run.ipynb",
+            "simulations/pcmciplus.ipynb",
+            "simulations/var_granger.ipynb",
+        )
+        for relative_path in simulation_paths:
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            with self.subTest(notebook=relative_path):
+                self.assertIn("outputs/matched_dynamic_benchmark", source)
+                self.assertIn("--max-lag', '1'", source)
+
+        lpcmci_source = "\n".join(
+            _code_cells(NOTEBOOK_ROOT / "simulations" / "lpcmci.ipynb")
+        )
+        self.assertIn("RUN_CONFOUNDING_SENSITIVITY = True", lpcmci_source)
+        self.assertIn("'baseline_rows.csv', 'summary.json'", lpcmci_source)
+
+    def test_four_method_notebooks_execute_reviewer_bias_audits(self) -> None:
+        simulation_paths = (
+            "simulations/c-GC.ipynb",
+            "simulations/c-GC-star.ipynb",
+            "simulations/pcmciplus.ipynb",
+            "simulations/var_granger.ipynb",
+        )
+        motor_paths = (
+            "motorneurons/c-GC_Motoneurons.ipynb",
+            "motorneurons/c-GC-star_Motoneurons.ipynb",
+            "motorneurons/pcmciplus.ipynb",
+            "motorneurons/var_granger.ipynb",
+        )
+        expected_algorithms = ("cgc", "cgc-star", "pcmciplus", "var-granger")
+        for relative_path, algorithm in zip(simulation_paths, expected_algorithms):
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            with self.subTest(notebook=relative_path):
+                self.assertIn("RUN_REVIEWER_AUDITS = True", source)
+                self.assertIn("examples/run_representation_bias_benchmarks.py", source)
+                self.assertIn(
+                    "examples/analyze_representation_bias_benchmarks.py", source
+                )
+                self.assertIn(
+                    "outputs/representation_bias_benchmark/simulations", source
+                )
+                self.assertIn(f"'--algorithm', '{algorithm}'", source)
+                self.assertIn("'--n-seeds', '20'", source)
+                self.assertIn("'--n-steps', '1500'", source)
+                self.assertIn("'--n-surrogates', '1000'", source)
+                self.assertIn("--resume", source)
+                self.assertIn("'cross_representation_rows.csv'", source)
+                self.assertIn("'summary.json'", source)
+        for relative_path, algorithm in zip(motor_paths, expected_algorithms):
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            with self.subTest(notebook=relative_path):
+                self.assertIn("RUN_REVIEWER_AUDITS = True", source)
+                self.assertIn("examples/run_representation_bias_benchmarks.py", source)
+                self.assertIn(
+                    "examples/analyze_representation_bias_benchmarks.py", source
+                )
+                self.assertIn(
+                    "outputs/representation_bias_benchmark/motorneurons", source
+                )
+                self.assertIn(f"'--algorithm', '{algorithm}'", source)
+                self.assertIn("'--cases', 'C,D'", source)
+                self.assertIn("'--recordings', 'F3T1,F3T2,F5T2'", source)
+                self.assertIn("'--n-surrogates', '6000'", source)
+                self.assertIn("--resume", source)
+                self.assertIn("'cross_representation_rows.csv'", source)
+                self.assertIn("'summary.json'", source)
+
+    def test_fast_baseline_notebooks_expose_all_hypotheses(self) -> None:
+        for relative_path in (
+            "simulations/pcmciplus.ipynb",
+            "simulations/var_granger.ipynb",
+        ):
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            notebook_text = (NOTEBOOK_ROOT / relative_path).read_text()
+            with self.subTest(notebook=relative_path):
+                self.assertIn("examples/analyze_fast_baseline_hypotheses.py", source)
+                self.assertIn("RUN_HYPOTHESIS_ANALYSIS = True", source)
+                for hypothesis in ("H1", "H2", "H3", "H4"):
+                    self.assertIn(f"## {hypothesis}", notebook_text)
+                for output in (
+                    "h1_transient_characterization.csv",
+                    "h1_characterization_summary.csv",
+                    "h2_representation_recovery.csv",
+                    "h2_paired_representation_contrasts.csv",
+                    "h3_null_comparators.csv",
+                    "h3_empirical_null_summary.csv",
+                    "h4_robustness.csv",
+                    "h4_robustness_summary.csv",
+                    "h4_extreme_contrasts.csv",
+                    "analysis-report.md",
+                    "stats-appendix.md",
+                ):
+                    self.assertIn(output, source)
+                self.assertIn("dynamic-extension", source)
+                self.assertIn("1500", source)
+                self.assertIn("'--n-null', '99'", source)
+                self.assertIn("'--n-sweep-seeds', '20'", source)
+        dynamic_source = "\n".join(
+            _code_cells(
+                NOTEBOOK_ROOT / "simulations" / "06_dynamic_extensions_run.ipynb"
+            )
+        )
+        self.assertIn("--cgc-depths', '1,2,3'", dynamic_source)
+        self.assertIn("--cgc-tau', '1'", dynamic_source)
+        self.assertIn("examples/analyze_episodic_effective_samples.py", dynamic_source)
+
+        for relative_path in (
+            "simulations/c-GC.ipynb",
+            "simulations/c-GC-star.ipynb",
+        ):
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            with self.subTest(notebook=relative_path, audit="episodic-grid"):
+                self.assertIn("examples/dynamic_episodic_validation.py", source)
+                self.assertIn("'--methods', 'cgc,cgc-star'", source)
+                self.assertIn("'--event-modes', 'compressed,physical'", source)
+                self.assertIn("'--n-pasts', '1'", source)
+                self.assertIn("--restart-incompatible-resume", source)
+
+        confounding_paths = (
+            "simulations/06_dynamic_extensions_run.ipynb",
+            "simulations/c-GC.ipynb",
+            "simulations/c-GC-star.ipynb",
+            "simulations/pcmciplus.ipynb",
+            "simulations/var_granger.ipynb",
+            "simulations/lpcmci.ipynb",
+        )
+        for relative_path in confounding_paths:
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            with self.subTest(notebook=relative_path):
+                self.assertIn("outputs/matched_confounding_benchmark", source)
+                self.assertIn("latent_common_driver", source)
+                self.assertIn("shared_observation_noise", source)
+                self.assertIn("--max-lag', '1'", source)
+
+        motor_paths = (
+            "motorneurons/c-GC_Motoneurons.ipynb",
+            "motorneurons/c-GC-star_Motoneurons.ipynb",
+            "motorneurons/pcmciplus.ipynb",
+            "motorneurons/var_granger.ipynb",
+        )
+        for relative_path in motor_paths:
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            with self.subTest(notebook=relative_path):
+                self.assertIn("outputs/matched_motorneuron_benchmark", source)
+                self.assertIn("--cases', 'C,D'", source)
+                self.assertIn("--recordings', 'F3T1,F3T2,F5T2'", source)
+                self.assertIn("--representations', 'rise,fall'", source)
+                self.assertIn("--max-lag', '1'", source)
+                self.assertIn("examples/analyze_matched_motorneuron_benchmark.py", source)
+                self.assertIn("'baseline_rows.csv', 'summary.json'", source)
+
+    def test_matched_analyzers_emit_strict_analysis_bundles(self) -> None:
+        for filename in (
+            "analyze_matched_dynamic_benchmark.py",
+            "analyze_matched_confounding_benchmark.py",
+            "analyze_matched_motorneuron_benchmark.py",
+            "analyze_episodic_effective_samples.py",
+            "analyze_fast_baseline_hypotheses.py",
+        ):
+            source = (NOTEBOOK_ROOT.parent / "examples" / filename).read_text()
+            with self.subTest(analyzer=filename):
+                self.assertIn("analysis-report.md", source)
+                self.assertIn("stats-appendix.md", source)
+                self.assertIn("figure-catalog.md", source)
 
     def test_baseline_environment_setup_reproduces_shared_environment(self) -> None:
         setup_command = "uv sync --frozen --all-extras"

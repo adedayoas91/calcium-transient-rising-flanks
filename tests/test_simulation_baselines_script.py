@@ -139,14 +139,14 @@ class SimulationBaselineScriptTests(unittest.TestCase):
             run_index=0,
             condition="native",
             seed=1,
-            n_steps=80,
+            n_steps=1500,
             n_seeds=4,
         )
         second = script.matched_static_dataset(
             run_index=0,
             condition="native",
             seed=1,
-            n_steps=80,
+            n_steps=1500,
             n_seeds=4,
         )
         np.testing.assert_array_equal(first["truth"], second["truth"])
