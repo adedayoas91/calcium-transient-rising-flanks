@@ -138,6 +138,14 @@ class MatchedMotorneuronAnalysisTests(unittest.TestCase):
         self.assertTrue(contrasts)
         self.assertTrue(all(row["p_value"] is None for row in contrasts))
 
+        with TemporaryDirectory() as directory:
+            output_path = Path(directory) / "contrasts.csv"
+            motor._write_csv(output_path, contrasts)
+            header = output_path.read_text(encoding="utf-8").splitlines()[0]
+
+        self.assertIn("reference_n_pasts", header)
+        self.assertIn("n_pasts", header)
+
 
 class MatchedConfoundingAnalysisTests(unittest.TestCase):
     def test_validation_uses_a_common_skeleton_estimand(self) -> None:

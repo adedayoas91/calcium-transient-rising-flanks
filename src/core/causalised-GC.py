@@ -13,16 +13,6 @@ from typing import Any, Optional
 
 import numpy as np
 
-try:
-    from numba import jit
-except Exception:  # pragma: no cover - numba is optional at runtime
-    def jit(*_args, **_kwargs):  # type: ignore[misc]
-        def decorator(func):
-            return func
-
-        return decorator
-
-
 SHD = None
 SID = None
 
@@ -74,16 +64,52 @@ def regression_residual(x: np.ndarray, z: np.ndarray) -> np.ndarray:
         Conditioning set shaped ``(n_covariates, T)``.
     """
 
-    if z.size == 0:
-        return x - np.mean(x)
+    target = np.asarray(x, dtype=float)
+    conditioning = np.asarray(z, dtype=float)
+    if target.ndim != 1:
+        raise ValueError("x must be one-dimensional")
+    if not np.isfinite(target).all() or not np.isfinite(conditioning).all():
+        raise ValueError("regression inputs must contain only finite values")
+    if conditioning.size == 0:
+        return target - np.mean(target)
 
-    if z.ndim == 1:
-        z = z[np.newaxis, :]
+    if conditioning.ndim == 1:
+        conditioning = conditioning[np.newaxis, :]
+    if conditioning.ndim != 2 or conditioning.shape[1] != target.size:
+        raise ValueError("z must have shape (n_covariates, x.size)")
 
-    design = np.column_stack([np.ones(x.size), z.T])
-    coef, *_ = np.linalg.lstsq(design, x, rcond=None)
-    fitted = design @ coef
-    return x - fitted
+    design = np.column_stack([np.ones(target.size), conditioning.T])
+    try:
+        coef, *_ = np.linalg.lstsq(design, target, rcond=None)
+        return target - design @ coef
+    except np.linalg.LinAlgError:
+        # Some LAPACK SVD implementations occasionally fail on the highly
+        # collinear lag matrices produced by shared-input simulations. Centering
+        # and scaling preserve the conditioning column space. An eigensolved
+        # Gram pseudoinverse then provides the same least-squares projection
+        # without calling the failed SVD path.
+        centered_target = target - np.mean(target)
+        centered = conditioning - np.mean(conditioning, axis=1, keepdims=True)
+        scales = np.linalg.norm(centered, axis=1)
+        scale_tolerance = np.finfo(float).eps * max(1.0, float(np.max(scales)))
+        retained = scales > scale_tolerance
+        if not np.any(retained):
+            return centered_target
+        predictors = (centered[retained] / scales[retained, None]).T
+        gram = predictors.T @ predictors
+        eigenvalues, eigenvectors = np.linalg.eigh(gram)
+        eigen_tolerance = (
+            np.finfo(float).eps
+            * max(predictors.shape)
+            * max(1.0, float(np.max(np.abs(eigenvalues))))
+        )
+        inverse = np.zeros_like(eigenvalues)
+        estimable = eigenvalues > eigen_tolerance
+        inverse[estimable] = 1.0 / eigenvalues[estimable]
+        coef = eigenvectors @ (
+            inverse * (eigenvectors.T @ (predictors.T @ centered_target))
+        )
+        return centered_target - predictors @ coef
 
 
 @dataclass
@@ -697,7 +723,12 @@ class GcStar:
     ) -> np.ndarray:
         """Construct a weighted connectivity matrix from significance masks."""
 
-        if self.corr_ is None or self.inv_corr_ is None:
+        if (
+            self.corr_ is None
+            or self.inv_corr_ is None
+            or self.pVal_corr_ is None
+            or self.pVal_inv_corr_ is None
+        ):
             raise RuntimeError("fit must be called before get_connectivity_matrix.")
 
         sig_corr = np.multiply(self.corr_, self.pVal_corr_ <= alpha)
@@ -776,7 +807,7 @@ class GcStar:
         global SHD, SID
         if SHD is None:
             try:
-                from cdt.metrics import SHD as _SHD, SID as _SID
+                from cdt.metrics import SHD as _SHD, SID as _SID  # type: ignore[import-not-found]
             except Exception as exc:  # pragma: no cover - optional dependency
                 raise ImportError("cdt.metrics is required for SHD/SID computations.") from exc
             SHD, SID = _SHD, _SID

@@ -1,5 +1,7 @@
-import unittest
+import sys
 from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -16,6 +18,26 @@ from core.rising_flanks import RisingFlanks
 
 
 class EstimatorTests(unittest.TestCase):
+    def test_regression_residual_falls_back_when_svd_does_not_converge(self) -> None:
+        GcStar = _load_gcstar_class()
+        core_module = sys.modules[GcStar.__module__]
+        rng = np.random.default_rng(20261008)
+        z = rng.normal(size=(5, 200))
+        z[4] = z[0] + z[1]
+        x = 0.5 * z[0] - 0.25 * z[2] + rng.normal(scale=0.1, size=200)
+        expected = core_module.regression_residual(x, z)
+
+        with patch.object(
+            core_module.np.linalg,
+            "lstsq",
+            side_effect=np.linalg.LinAlgError("SVD did not converge"),
+        ):
+            residual = core_module.regression_residual(x, z)
+
+        self.assertTrue(np.isfinite(residual).all())
+        self.assertAlmostEqual(float(np.mean(residual)), 0.0, places=12)
+        np.testing.assert_allclose(residual, expected, atol=1e-12, rtol=1e-10)
+
     def test_rise_flank_runs_drop_short_segments_and_match_shifted_candidates(
         self,
     ) -> None:

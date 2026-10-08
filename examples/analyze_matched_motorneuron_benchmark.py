@@ -129,7 +129,9 @@ def validate_matched_design(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _bootstrap_ci(
-    values: Sequence[float], rng: np.random.Generator, n_bootstrap: int
+    values: Sequence[float] | np.ndarray,
+    rng: np.random.Generator,
+    n_bootstrap: int,
 ) -> tuple[float, float]:
     finite = np.asarray(values, dtype=float)
     finite = finite[np.isfinite(finite)]
@@ -247,7 +249,7 @@ def descriptive_paired_contrasts(
         for algorithm in ("cgc", "cgc-star"):
             for representation in ("rise", "fall"):
                 for depth in (2, 3):
-                    values = []
+                    depth_differences: list[float] = []
                     for recording in recordings:
                         selected = {
                             int(row["n_pasts"]): row
@@ -257,11 +259,11 @@ def descriptive_paired_contrasts(
                             and row["recording"] == recording
                             and row["representation"] == representation
                         }
-                        values.append(
+                        depth_differences.append(
                             float(selected[depth]["edge_density"])
                             - float(selected[1]["edge_density"])
                         )
-                    array = np.asarray(values, dtype=float)
+                    array = np.asarray(depth_differences, dtype=float)
                     lower, upper = _bootstrap_ci(array, rng, n_bootstrap)
                     output.append(
                         {
@@ -288,8 +290,9 @@ def descriptive_paired_contrasts(
 
 
 def _write_csv(path: Path, rows: Sequence[dict[str, Any]]) -> None:
+    fieldnames = list(dict.fromkeys(field for row in rows for field in row))
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 

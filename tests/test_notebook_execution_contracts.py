@@ -115,25 +115,53 @@ DIRECT_HEAVY_NOTEBOOKS = {
 }
 SAFE_RUN_TOGGLES = {
     "01_dynamic_episodic_validation_run.ipynb": ("RUN_VALIDATION",),
-    "02_saved_artifact_analysis_run.ipynb": ("RUN_ANALYSIS",),
-    "03_publication_gate_pipeline_run.ipynb": ("RUN_PIPELINE",),
-    "04_temporal_resolvability_map.ipynb": (
-        "RUN_SMOKE",
-        "RUN_LOCKED_GRID",
-        "RUN_STRICT_ANALYSIS",
-    ),
-    "05_calibration_onset_run.ipynb": ("RUN_THRESHOLD", "RUN_ONSET"),
+    "04_temporal_resolvability_map.ipynb": ("RUN_SMOKE",),
     "06_dynamic_extensions_run.ipynb": (
-        "RUN_MIXED_FALL",
-        "RUN_HYBRID",
         "RUN_MATCHED_FULL_AXIS",
         "RUN_CONFOUNDING_SENSITIVITY",
         "RUN_SELECTION_AUDIT",
     ),
     "08_validation_campaign_run.ipynb": ("RUN_CAMPAIGN",),
-    "fdr_reestimation.ipynb": ("RUN_BH", "RUN_UNADJUSTED"),
-    "Temporal_resolvability_screen.ipynb": ("RUN_SCREEN",),
 }
+FINAL_RUN_TOGGLES = {
+    "simulations/02_saved_artifact_analysis_run.ipynb": ("RUN_ANALYSIS",),
+    "simulations/03_publication_gate_pipeline_run.ipynb": ("RUN_PIPELINE",),
+    "simulations/04_temporal_resolvability_map.ipynb": (
+        "RUN_LOCKED_GRID",
+        "RUN_STRICT_ANALYSIS",
+    ),
+    "simulations/05_calibration_onset_run.ipynb": (
+        "RUN_THRESHOLD",
+        "RUN_ONSET",
+    ),
+    "simulations/06_dynamic_extensions_run.ipynb": (
+        "RUN_MIXED_FALL",
+        "RUN_HYBRID",
+    ),
+    "motorneurons/fdr_reestimation.ipynb": ("RUN_BH", "RUN_UNADJUSTED"),
+    "motorneurons/Temporal_resolvability_screen.ipynb": ("RUN_SCREEN",),
+}
+CANONICAL_NOTEBOOK_ORDER = (
+    "simulations/04_temporal_resolvability_map.ipynb",
+    "simulations/05_calibration_onset_run.ipynb",
+    "simulations/06_dynamic_extensions_run.ipynb",
+    "simulations/c-GC.ipynb",
+    "simulations/c-GC-star.ipynb",
+    "simulations/lpcmci.ipynb",
+    "simulations/oasis.ipynb",
+    "simulations/pcmciplus.ipynb",
+    "simulations/var_granger.ipynb",
+    "motorneurons/fdr_reestimation.ipynb",
+    "motorneurons/Temporal_resolvability_screen.ipynb",
+    "motorneurons/c-GC_Motoneurons.ipynb",
+    "motorneurons/c-GC-star_Motoneurons.ipynb",
+    "motorneurons/lpcmci.ipynb",
+    "motorneurons/oasis.ipynb",
+    "motorneurons/pcmciplus.ipynb",
+    "motorneurons/var_granger.ipynb",
+    "simulations/03_publication_gate_pipeline_run.ipynb",
+    "simulations/02_saved_artifact_analysis_run.ipynb",
+)
 READY_TO_RUN_TOGGLES = {
     "simulations/lpcmci.ipynb": "RUN_LPCMCI",
     "simulations/oasis.ipynb": "RUN_OASIS",
@@ -185,6 +213,24 @@ def _notebook_key(path: Path) -> str:
 
 
 class NotebookExecutionContractTests(unittest.TestCase):
+    def test_execution_guide_lists_every_notebook_in_canonical_order(self) -> None:
+        guide = (NOTEBOOK_ROOT / "exec_order.md").read_text(encoding="utf-8")
+        positions = [guide.index(path) for path in CANONICAL_NOTEBOOK_ORDER]
+        self.assertEqual(positions, sorted(positions))
+
+        documented = set(CANONICAL_NOTEBOOK_ORDER)
+        documented.update(
+            {
+                "simulations/00_hyperparameter_timeseries_explorer.ipynb",
+                "simulations/01_dynamic_episodic_validation_run.ipynb",
+                "simulations/08_validation_campaign_run.ipynb",
+            }
+        )
+        discovered = {
+            path.relative_to(NOTEBOOK_ROOT).as_posix() for path in _all_notebooks()
+        }
+        self.assertEqual(documented, discovered)
+
     def test_retired_legacy_and_hindbrain_notebooks_are_absent(self) -> None:
         retired = (
             "Rising_flanks_WithSections.ipynb",
@@ -303,6 +349,22 @@ class NotebookExecutionContractTests(unittest.TestCase):
             with self.subTest(notebook=relative_path):
                 self.assertRegex(source, rf"\b{re.escape(toggle)}\s*=\s*True\b")
                 self.assertNotIn("--dry-run", source)
+
+    def test_supporting_notebooks_are_ready_for_the_final_run(self) -> None:
+        for relative_path, toggles in FINAL_RUN_TOGGLES.items():
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            for toggle in toggles:
+                with self.subTest(notebook=relative_path, toggle=toggle):
+                    self.assertRegex(
+                        source, rf"\b{re.escape(toggle)}\s*=\s*True\b"
+                    )
+
+        publication_source = "\n".join(
+            _code_cells(
+                NOTEBOOK_ROOT / "simulations/03_publication_gate_pipeline_run.ipynb"
+            )
+        )
+        self.assertRegex(publication_source, r"\bSKIP_DYNAMIC\s*=\s*True\b")
 
     def test_matched_benchmark_notebooks_lock_common_estimands(self) -> None:
         simulation_paths = (
@@ -482,6 +544,28 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 self.assertIn(setup_command, notebook_text)
                 self.assertNotIn("uv sync --extra pag", notebook_text)
                 self.assertNotIn("uv sync --extra deconvolution", notebook_text)
+
+    def test_oasis_notebooks_preflight_the_selected_python_environment(self) -> None:
+        for relative_path in (
+            "simulations/oasis.ipynb",
+            "motorneurons/oasis.ipynb",
+        ):
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            with self.subTest(notebook=relative_path):
+                self.assertIn("def has_oasis", source)
+                self.assertIn("import oasis", source)
+                self.assertIn("uv sync --frozen --all-extras", source)
+
+    def test_matched_notebooks_explain_primary_fit_count(self) -> None:
+        for relative_path in (
+            "simulations/c-GC.ipynb",
+            "simulations/c-GC-star.ipynb",
+            "simulations/pcmciplus.ipynb",
+            "simulations/var_granger.ipynb",
+        ):
+            notebook_text = (NOTEBOOK_ROOT / relative_path).read_text()
+            with self.subTest(notebook=relative_path):
+                self.assertIn("300 primary fits per algorithm", notebook_text)
 
     def test_runner_notebooks_find_root_from_common_jupyter_directories(self) -> None:
         package_root = NOTEBOOK_ROOT.parent.resolve()
