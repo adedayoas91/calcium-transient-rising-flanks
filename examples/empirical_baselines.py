@@ -16,6 +16,8 @@ import hashlib
 import json
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -497,7 +499,7 @@ def run_lpcmci(
     result = LPCMCIAdapter(
         tau_max=tau_max,
         run_kwargs={"tau_min": 0, "pc_alpha": pc_alpha},
-        verbosity=1 if progress else 0,
+        verbosity=0,
     ).fit(values)
     skeleton = result.lossy_lagged_skeleton()
     artifact = _pag_artifact_path(
@@ -548,6 +550,26 @@ def run_lpcmci(
         "skeleton_retained_edges": skeleton_summary["retained_edges"],
         **_lagged_p_descriptives(result.p_matrix, alpha=pc_alpha),
     }
+
+
+def _run_lpcmci_task(
+    task: tuple[dict[str, Any], str],
+    *,
+    output_dir: Path,
+    tau_max: int,
+    pc_alpha: float,
+) -> dict[str, Any]:
+    record, representation = task
+    unit = _lpcmci_unit(record, representation=representation)
+    print(f"[unit] worker starting {unit}", flush=True)
+    return run_lpcmci(
+        record,
+        output_dir=output_dir,
+        representation=representation,
+        tau_max=tau_max,
+        pc_alpha=pc_alpha,
+        progress=True,
+    )
 
 
 def _expected_units(
@@ -672,6 +694,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--alpha", type=float, default=0.05)
     parser.add_argument("--lpcmci-tau-max", type=int, default=3)
     parser.add_argument("--lpcmci-pc-alpha", type=float, default=0.05)
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=1,
+        help="Independent LPCMCI fits to run concurrently",
+    )
     parser.add_argument("--seed", type=int, default=10)
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
@@ -711,6 +739,8 @@ def main() -> None:
         raise SystemExit("--n-cgc-surrogates must be positive")
     if not 0.0 < args.alpha < 1.0 or not 0.0 < args.lpcmci_pc_alpha < 1.0:
         raise SystemExit("alpha values must lie in (0, 1)")
+    if args.n_jobs < 1:
+        raise SystemExit("--n-jobs must be positive")
 
     records = load_motoneuron_records(
         args.data_file,
@@ -754,7 +784,8 @@ def main() -> None:
     expected_count = len(expected_relative)
     previous_active_unit: str | None = None
     print(
-        f"[plan] {expected_count} checkpoint units; output={args.output_dir}",
+        f"[plan] {expected_count} checkpoint units; workers={args.n_jobs}; "
+        f"output={args.output_dir}",
         flush=True,
     )
     if args.resume and progress_path.exists():
@@ -902,7 +933,7 @@ def main() -> None:
                         flush=True,
                     )
 
-        if "lpcmci" in components:
+        if "lpcmci" in components and args.n_jobs == 1:
             for representation in representations:
                 unit = _lpcmci_unit(record, representation=representation)
                 if unit in completed:
@@ -945,6 +976,54 @@ def main() -> None:
                     + f" | completed {unit}",
                     flush=True,
                 )
+
+    if "lpcmci" in components and args.n_jobs > 1:
+        pending_tasks = tuple(
+            (record, representation)
+            for record in records
+            for representation in representations
+            if _lpcmci_unit(record, representation=representation) not in completed
+        )
+        worker = partial(
+            _run_lpcmci_task,
+            output_dir=args.output_dir,
+            tau_max=args.lpcmci_tau_max,
+            pc_alpha=args.lpcmci_pc_alpha,
+        )
+        if pending_tasks:
+            _write_progress(
+                args.output_dir,
+                config=config,
+                completed=completed,
+                expected_count=expected_count,
+                status="running",
+                active_unit=f"parallel batch ({args.n_jobs} workers)",
+            )
+            with ProcessPoolExecutor(max_workers=args.n_jobs) as executor:
+                for row in executor.map(worker, pending_tasks, chunksize=1):
+                    unit = str(row["unit"])
+                    graph_rows.append(row)
+                    completed.add(unit)
+                    _write_csv(graph_partial, graph_rows)
+                    _write_progress(
+                        args.output_dir,
+                        config=config,
+                        completed=completed,
+                        expected_count=expected_count,
+                        status="running",
+                        active_unit=(
+                            f"parallel batch ({args.n_jobs} workers)"
+                            if len(completed) < expected_count
+                            else None
+                        ),
+                    )
+                    print(
+                        format_progress(
+                            len(completed), expected_count, label="Overall units"
+                        )
+                        + f" | completed {unit}",
+                        flush=True,
+                    )
 
     _write_csv(args.output_dir / "oasis_preprocessing_rows.csv", oasis_rows)
     _write_csv(args.output_dir / "graph_summary_rows.csv", graph_rows)

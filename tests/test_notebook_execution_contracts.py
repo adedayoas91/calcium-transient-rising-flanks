@@ -626,6 +626,22 @@ class NotebookExecutionContractTests(unittest.TestCase):
         )
         self.assertIn("--restart-incompatible-resume", oasis_source)
 
+    def test_lpcmci_notebooks_parallelize_only_independent_fits(self) -> None:
+        for relative_path in (
+            "simulations/lpcmci.ipynb",
+            "motorneurons/lpcmci.ipynb",
+        ):
+            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
+            with self.subTest(notebook=relative_path):
+                self.assertIn("RF_LPCMCI_N_JOBS", source)
+                self.assertIn("'--n-jobs', str(N_JOBS)", source)
+                self.assertIn("RUNNER_ENV[thread_variable] = '1'", source)
+                if relative_path.startswith("simulations/"):
+                    self.assertGreaterEqual(
+                        source.count("'--n-jobs', str(N_JOBS)"),
+                        2,
+                    )
+
     def test_baseline_notebooks_expose_each_reference_analysis_section(self) -> None:
         required_sections = (
             "H1 — kinetic asymmetry and transient characterization",

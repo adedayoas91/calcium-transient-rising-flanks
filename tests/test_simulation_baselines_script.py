@@ -31,6 +31,7 @@ class SimulationBaselineScriptTests(unittest.TestCase):
             lpcmci_tau_max=2,
             lpcmci_pc_alpha=0.05,
             event_tolerance=2,
+            n_jobs=4,
         )
 
         oasis = script._config(
@@ -60,6 +61,18 @@ class SimulationBaselineScriptTests(unittest.TestCase):
         self.assertEqual(oasis["resume_schema_version"], 5)
         self.assertEqual(lpcmci["resume_schema_version"], 4)
         self.assertNotIn("cgc", lpcmci)
+        self.assertNotIn("n_jobs", lpcmci)
+
+    def test_serial_result_iterator_preserves_unit_order(self) -> None:
+        script = _load_script_module()
+        specs = ((0, "native", 1), (0, "noisy", 2))
+
+        def worker(spec):
+            return spec, [{"seed": spec[2]}], []
+
+        results = list(script._iter_simulation_results(worker, specs, n_jobs=1))
+
+        self.assertEqual([result[0] for result in results], list(specs))
 
     def test_incompatible_output_is_preserved_before_restart(self) -> None:
         script = _load_script_module()

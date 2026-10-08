@@ -14,8 +14,10 @@ import hashlib
 import json
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
 import numpy as np
 
@@ -605,7 +607,7 @@ def rows_for_unit(
             lpcmci = LPCMCIAdapter(
                 tau_max=lpcmci_tau_max,
                 run_kwargs={"tau_min": 0, "pc_alpha": lpcmci_pc_alpha},
-                verbosity=1 if progress else 0,
+                verbosity=0,
             ).fit(representation)
             pag_path = (
                 pag_dir
@@ -652,6 +654,68 @@ def rows_for_unit(
                 }
             )
     return event_rows, graph_rows
+
+
+SimulationUnit = tuple[int, str, int]
+SimulationUnitResult = tuple[
+    SimulationUnit,
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]
+
+
+def _run_simulation_unit(
+    spec: SimulationUnit,
+    *,
+    n_steps: int,
+    n_seeds: int,
+    n_cgc_surrogates: int,
+    lpcmci_tau_max: int,
+    lpcmci_pc_alpha: float,
+    event_tolerance: int,
+    pag_dir: Path,
+    components: Sequence[str],
+    representation_names: Sequence[str],
+    cgc_methods: Sequence[str],
+) -> SimulationUnitResult:
+    run_index, condition, seed = spec
+    print(
+        "[unit] worker starting "
+        f"run={run_index}, condition={condition}, seed={seed}",
+        flush=True,
+    )
+    event_rows, graph_rows = rows_for_unit(
+        run_index=run_index,
+        condition=condition,
+        seed=seed,
+        n_steps=n_steps,
+        n_seeds=n_seeds,
+        n_cgc_surrogates=n_cgc_surrogates,
+        lpcmci_tau_max=lpcmci_tau_max,
+        lpcmci_pc_alpha=lpcmci_pc_alpha,
+        event_tolerance=event_tolerance,
+        pag_dir=pag_dir,
+        components=components,
+        representation_names=representation_names,
+        cgc_methods=cgc_methods,
+        progress=True,
+    )
+    return spec, event_rows, graph_rows
+
+
+def _iter_simulation_results(
+    worker: Callable[[SimulationUnit], SimulationUnitResult],
+    specs: Sequence[SimulationUnit],
+    *,
+    n_jobs: int,
+) -> Iterator[SimulationUnitResult]:
+    if not specs:
+        return
+    if n_jobs == 1:
+        yield from map(worker, specs)
+        return
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        yield from executor.map(worker, specs, chunksize=1)
 
 
 def _config(
@@ -867,6 +931,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lpcmci-pc-alpha", type=float, default=0.05)
     parser.add_argument("--event-tolerance", type=int, default=2)
     parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=1,
+        help="Independent checkpoint units to run concurrently",
+    )
+    parser.add_argument(
         "--components",
         default=",".join(COMPONENTS),
         help="Comma-separated baseline components: oasis,lpcmci",
@@ -925,6 +995,8 @@ def main() -> None:
         raise SystemExit("--lpcmci-pc-alpha must lie in (0, 1)")
     if args.event_tolerance < 0:
         raise SystemExit("--event-tolerance cannot be negative")
+    if args.n_jobs < 1:
+        raise SystemExit("--n-jobs must be positive")
     config = _config(
         args,
         components=components,
@@ -946,6 +1018,7 @@ def main() -> None:
         "[plan] "
         f"{total_units} checkpoint units; "
         f"{total_lpcmci_fits if 'lpcmci' in components else 0} LPCMCI fits; "
+        f"workers={args.n_jobs}; "
         f"output={args.output_dir}",
         flush=True,
     )
@@ -985,8 +1058,8 @@ def main() -> None:
         )
         if previous_active_unit and previous_active_unit not in completed_units:
             print(
-                f"[resume] previous run stopped during {previous_active_unit}; "
-                "that whole outer-run/condition/seed unit will be recomputed",
+                f"[resume] previous run stopped with work in flight: "
+                f"{previous_active_unit}; incomplete units will be recomputed",
                 flush=True,
             )
     elif args.resume:
@@ -1008,38 +1081,43 @@ def main() -> None:
         completed_units=completed_units,
         status="running",
     )
-    for run_index, condition, seed in unit_specs:
-        unit = _unit_key(run_index, condition, seed)
-        if unit in completed_units:
-            continue
-        print(
-            f"[unit] starting {len(completed_units) + 1}/{total_units}: "
-            f"run={run_index}, condition={condition}, seed={seed}",
-            flush=True,
+    pending_specs = tuple(
+        spec
+        for spec in unit_specs
+        if _unit_key(*spec) not in completed_units
+    )
+    worker = partial(
+        _run_simulation_unit,
+        n_steps=args.n_steps,
+        n_seeds=args.n_seeds,
+        n_cgc_surrogates=args.n_cgc_surrogates,
+        lpcmci_tau_max=args.lpcmci_tau_max,
+        lpcmci_pc_alpha=args.lpcmci_pc_alpha,
+        event_tolerance=args.event_tolerance,
+        pag_dir=args.output_dir / "raw_pag",
+        components=components,
+        representation_names=representations,
+        cgc_methods=cgc_methods,
+    )
+    if pending_specs:
+        active_unit = (
+            _unit_key(*pending_specs[0])
+            if args.n_jobs == 1
+            else f"parallel batch ({args.n_jobs} workers)"
         )
         _write_progress(
             args.output_dir,
             config=config,
             completed_units=completed_units,
             status="running",
-            active_unit=unit,
+            active_unit=active_unit,
         )
-        new_event_rows, new_graph_rows = rows_for_unit(
-            run_index=run_index,
-            condition=condition,
-            seed=seed,
-            n_steps=args.n_steps,
-            n_seeds=args.n_seeds,
-            n_cgc_surrogates=args.n_cgc_surrogates,
-            lpcmci_tau_max=args.lpcmci_tau_max,
-            lpcmci_pc_alpha=args.lpcmci_pc_alpha,
-            event_tolerance=args.event_tolerance,
-            pag_dir=args.output_dir / "raw_pag",
-            components=components,
-            representation_names=representations,
-            cgc_methods=cgc_methods,
-            progress=True,
-        )
+    for spec, new_event_rows, new_graph_rows in _iter_simulation_results(
+        worker,
+        pending_specs,
+        n_jobs=args.n_jobs,
+    ):
+        unit = _unit_key(*spec)
         event_rows.extend(new_event_rows)
         graph_rows.extend(new_graph_rows)
         completed_units.add(unit)
@@ -1051,6 +1129,11 @@ def main() -> None:
             config=config,
             completed_units=completed_units,
             status="running",
+            active_unit=(
+                f"parallel batch ({args.n_jobs} workers)"
+                if args.n_jobs > 1 and len(completed_units) < total_units
+                else None
+            ),
         )
         print(
             format_progress(

@@ -8,8 +8,10 @@ import hashlib
 import json
 import sys
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Iterator, NamedTuple, Sequence
 
 import numpy as np
 
@@ -497,17 +499,148 @@ def _simulation_specs(args: argparse.Namespace) -> list[dict[str, Any]]:
     return specs
 
 
+class SimulationFitTask(NamedTuple):
+    artifact_index: int
+    unit: str
+    spec: dict[str, Any]
+    representation: str
+    n_pasts: int | None
+
+
+SimulationFitResult = tuple[str, list[dict[str, Any]]]
+
+
+def _run_simulation_fit_task(
+    task: SimulationFitTask,
+    *,
+    algorithm: str,
+    max_lag: int,
+    alpha: float,
+    n_surrogates: int,
+    seed: int,
+    cgc_tau: int | None,
+    output_dir: Path,
+    config_digest: str,
+) -> SimulationFitResult:
+    print(f"[{algorithm}] worker starting baseline fit: {task.unit}", flush=True)
+    represented = representation_map(np.asarray(task.spec["traces"], dtype=float))
+    values = represented[task.representation]
+    adjacency, method_metadata, arrays = _fit(
+        algorithm,
+        values,
+        max_lag=max_lag,
+        alpha=alpha,
+        n_surrogates=n_surrogates,
+        random_state=_stable_seed(seed, task.unit),
+        n_pasts=task.n_pasts,
+        tau=cgc_tau,
+    )
+    artifact = (
+        output_dir / "artifacts" / f"{config_digest}__{task.artifact_index}.npz"
+    )
+    _atomic_npz(
+        artifact,
+        **arrays,
+        truth=np.asarray(task.spec["truth"], dtype=bool),
+        input_digest=np.asarray(task.spec["input_digest"]),
+        input_values=np.asarray(values, dtype=float),
+    )
+    truth_targets = task.spec.get("truth_targets", {"union": task.spec["truth"]})
+    unit_rows: list[dict[str, Any]] = []
+    for truth_target, truth in truth_targets.items():
+        recovery = edge_recovery(np.asarray(truth, dtype=bool), adjacency)
+        truth_skeleton = np.asarray(truth, dtype=bool)
+        truth_skeleton = truth_skeleton | truth_skeleton.T
+        adjacency_skeleton = np.asarray(adjacency, dtype=bool)
+        adjacency_skeleton = adjacency_skeleton | adjacency_skeleton.T
+        skeleton_recovery = edge_recovery(truth_skeleton, adjacency_skeleton)
+        f1 = (
+            0.0
+            if recovery.precision + recovery.recall == 0.0
+            else 2.0
+            * recovery.precision
+            * recovery.recall
+            / (recovery.precision + recovery.recall)
+        )
+        skeleton_f1 = (
+            0.0
+            if skeleton_recovery.precision + skeleton_recovery.recall == 0.0
+            else 2.0
+            * skeleton_recovery.precision
+            * skeleton_recovery.recall
+            / (skeleton_recovery.precision + skeleton_recovery.recall)
+        )
+        directed_metrics: dict[str, float | None] = {
+            "precision": recovery.precision,
+            "recall": recovery.recall,
+            "false_positive_rate": recovery.false_positive_rate,
+            "orientation_accuracy": recovery.orientation_accuracy,
+            "f1": f1,
+        }
+        if algorithm == "lpcmci":
+            directed_metrics = {
+                "precision": None,
+                "recall": None,
+                "false_positive_rate": None,
+                "orientation_accuracy": None,
+                "f1": None,
+            }
+        unit_rows.append(
+            {
+                "dataset": "simulations",
+                "simulation_kind": task.spec["simulation_kind"],
+                "condition": task.spec["condition"],
+                "seed": task.spec["seed"],
+                "algorithm": algorithm,
+                "representation": task.representation,
+                "truth_target": truth_target,
+                "truth_edges": int(np.count_nonzero(truth)),
+                "n_rois": int(np.asarray(task.spec["traces"]).shape[0]),
+                "n_timepoints": int(np.asarray(task.spec["traces"]).shape[1]),
+                "max_lag": max_lag,
+                "n_pasts": task.n_pasts,
+                "alpha": alpha,
+                **directed_metrics,
+                "skeleton_precision": skeleton_recovery.precision,
+                "skeleton_recall": skeleton_recovery.recall,
+                "skeleton_false_positive_rate": (
+                    skeleton_recovery.false_positive_rate
+                ),
+                "skeleton_f1": skeleton_f1,
+                "retained_edges": int(np.count_nonzero(adjacency)),
+                "input_digest": task.spec["input_digest"],
+                "shared_noise_std": task.spec.get("shared_noise_std"),
+                "latent_driver_targets": task.spec.get("latent_driver_targets"),
+                "artifact_path": str(artifact),
+                **method_metadata,
+            }
+        )
+    return task.unit, unit_rows
+
+
+def _iter_simulation_fit_results(
+    worker: Callable[[SimulationFitTask], SimulationFitResult],
+    tasks: Sequence[SimulationFitTask],
+    *,
+    n_jobs: int,
+) -> Iterator[SimulationFitResult]:
+    if not tasks:
+        return
+    if n_jobs == 1:
+        yield from map(worker, tasks)
+        return
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        yield from executor.map(worker, tasks, chunksize=1)
+
+
 def _run_simulations(
     args: argparse.Namespace,
     store: JsonUnitCheckpointStore,
 ) -> list[dict[str, Any]]:
     specs = _simulation_specs(args)
     cgc_depths = args.cgc_depths if args.algorithm in {"cgc", "cgc-star"} else (None,)
-    total = len(specs) * len(args.representations) * len(cgc_depths)
-    rows: list[dict[str, Any]] = []
-    completed = 0
+    tasks: list[SimulationFitTask] = []
     for spec in specs:
-        represented = representation_map(np.asarray(spec["traces"], dtype=float))
         for representation in args.representations:
             for n_pasts in cgc_depths:
                 depth_label = "native" if n_pasts is None else str(n_pasts)
@@ -515,110 +648,49 @@ def _run_simulations(
                     f"{spec['simulation_kind']}|{spec['condition']}|{spec['seed']}|"
                     f"{args.algorithm}|{representation}|n_pasts={depth_label}"
                 )
-                cached = store.load_rows(unit) if args.resume else None
-                if cached is not None:
-                    rows.extend(cached)
-                    completed += 1
-                    continue
-                adjacency, method_metadata, arrays = _fit(
-                    args.algorithm,
-                    represented[representation],
-                    max_lag=args.max_lag,
-                    alpha=args.alpha,
-                    n_surrogates=args.n_surrogates,
-                    random_state=_stable_seed(args.seed, unit),
-                    n_pasts=n_pasts,
-                    tau=args.cgc_tau,
-                )
-                artifact = (
-                    args.output_dir / "artifacts" / f"{store.digest}__{completed}.npz"
-                )
-                _atomic_npz(
-                    artifact,
-                    **arrays,
-                    truth=np.asarray(spec["truth"], dtype=bool),
-                    input_digest=np.asarray(spec["input_digest"]),
-                    input_values=np.asarray(represented[representation], dtype=float),
-                )
-                truth_targets = spec.get("truth_targets", {"union": spec["truth"]})
-                unit_rows: list[dict[str, Any]] = []
-                for truth_target, truth in truth_targets.items():
-                    recovery = edge_recovery(np.asarray(truth, dtype=bool), adjacency)
-                    truth_skeleton = np.asarray(truth, dtype=bool)
-                    truth_skeleton = truth_skeleton | truth_skeleton.T
-                    adjacency_skeleton = np.asarray(adjacency, dtype=bool)
-                    adjacency_skeleton = adjacency_skeleton | adjacency_skeleton.T
-                    skeleton_recovery = edge_recovery(
-                        truth_skeleton, adjacency_skeleton
+                tasks.append(
+                    SimulationFitTask(
+                        artifact_index=len(tasks),
+                        unit=unit,
+                        spec=spec,
+                        representation=representation,
+                        n_pasts=n_pasts,
                     )
-                    f1 = (
-                        0.0
-                        if recovery.precision + recovery.recall == 0.0
-                        else 2.0
-                        * recovery.precision
-                        * recovery.recall
-                        / (recovery.precision + recovery.recall)
-                    )
-                    skeleton_f1 = (
-                        0.0
-                        if skeleton_recovery.precision + skeleton_recovery.recall == 0.0
-                        else 2.0
-                        * skeleton_recovery.precision
-                        * skeleton_recovery.recall
-                        / (skeleton_recovery.precision + skeleton_recovery.recall)
-                    )
-                    directed_metrics = {
-                        "precision": recovery.precision,
-                        "recall": recovery.recall,
-                        "false_positive_rate": recovery.false_positive_rate,
-                        "orientation_accuracy": recovery.orientation_accuracy,
-                        "f1": f1,
-                    }
-                    if args.algorithm == "lpcmci":
-                        directed_metrics = {
-                            "precision": None,
-                            "recall": None,
-                            "false_positive_rate": None,
-                            "orientation_accuracy": None,
-                            "f1": None,
-                        }
-                    unit_rows.append(
-                        {
-                            "dataset": "simulations",
-                            "simulation_kind": spec["simulation_kind"],
-                            "condition": spec["condition"],
-                            "seed": spec["seed"],
-                            "algorithm": args.algorithm,
-                            "representation": representation,
-                            "truth_target": truth_target,
-                            "truth_edges": int(np.count_nonzero(truth)),
-                            "n_rois": int(np.asarray(spec["traces"]).shape[0]),
-                            "n_timepoints": int(np.asarray(spec["traces"]).shape[1]),
-                            "max_lag": args.max_lag,
-                            "n_pasts": n_pasts,
-                            "alpha": args.alpha,
-                            **directed_metrics,
-                            "skeleton_precision": skeleton_recovery.precision,
-                            "skeleton_recall": skeleton_recovery.recall,
-                            "skeleton_false_positive_rate": (
-                                skeleton_recovery.false_positive_rate
-                            ),
-                            "skeleton_f1": skeleton_f1,
-                            "retained_edges": int(np.count_nonzero(adjacency)),
-                            "input_digest": spec["input_digest"],
-                            "shared_noise_std": spec.get("shared_noise_std"),
-                            "latent_driver_targets": spec.get("latent_driver_targets"),
-                            "artifact_path": str(artifact),
-                            **method_metadata,
-                        }
-                    )
-                store.save_rows(unit, unit_rows)
-                rows.extend(unit_rows)
-                completed += 1
-                print(
-                    format_progress(completed, total, label="Baseline fits"),
-                    flush=True,
                 )
+    total = len(tasks)
+    rows_by_unit: dict[str, list[dict[str, Any]]] = {}
+    pending_tasks: list[SimulationFitTask] = []
+    for task in tasks:
+        cached = store.load_rows(task.unit) if args.resume else None
+        if cached is None:
+            pending_tasks.append(task)
+        else:
+            rows_by_unit[task.unit] = cached
+    completed = len(rows_by_unit)
+    worker = partial(
+        _run_simulation_fit_task,
+        algorithm=args.algorithm,
+        max_lag=args.max_lag,
+        alpha=args.alpha,
+        n_surrogates=args.n_surrogates,
+        seed=args.seed,
+        cgc_tau=args.cgc_tau,
+        output_dir=args.output_dir,
+        config_digest=store.digest,
+    )
+    for unit, unit_rows in _iter_simulation_fit_results(
+        worker,
+        pending_tasks,
+        n_jobs=args.n_jobs,
+    ):
+        store.save_rows(unit, unit_rows)
+        rows_by_unit[unit] = unit_rows
+        completed += 1
+        print(
+            format_progress(completed, total, label="Baseline fits"),
+            flush=True,
+        )
+    rows = [row for task in tasks for row in rows_by_unit[task.unit]]
     store.finish(completed_units=total, total_units=total)
     return rows
 
@@ -723,6 +795,12 @@ def parse_args() -> argparse.Namespace:
         help="Circular-shift replicates for c-GC/c-GC*; ignored by other learners.",
     )
     parser.add_argument("--seed", type=int, default=10)
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=1,
+        help="Independent simulation fits to run concurrently",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--n-seeds", type=int, default=8)
     parser.add_argument("--seed-start", type=int, default=1)
@@ -793,6 +871,8 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("--n-surrogates must be positive for c-GC/c-GC*")
     if not 0.0 < args.alpha < 1.0:
         raise SystemExit("--alpha must lie in (0, 1)")
+    if args.n_jobs < 1:
+        raise SystemExit("--n-jobs must be positive")
     return args
 
 

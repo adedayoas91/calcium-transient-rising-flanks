@@ -20,9 +20,11 @@ import hashlib
 import importlib.util
 import json
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import matplotlib
 
@@ -119,8 +121,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--baseline-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--n-null", type=int, default=6)
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=1,
+        help="Independent diagnostic units to run concurrently",
+    )
     parser.add_argument("--resume", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.n_jobs < 1:
+        raise SystemExit("--n-jobs must be positive")
+    return args
 
 
 def _read_baseline_summary(path: Path, baseline: str) -> dict[str, Any]:
@@ -430,7 +441,7 @@ def _fit_lpcmci(
     result = LPCMCIAdapter(
         tau_max=int(config["lpcmci_tau_max"]),
         run_kwargs={"tau_min": 0, "pc_alpha": float(config["lpcmci_pc_alpha"])},
-        verbosity=1,
+        verbosity=0,
     ).fit(matrix)
     skeleton = result.lossy_lagged_skeleton()
     symmetric_skeleton = (
@@ -574,6 +585,40 @@ def _run_unit(
         ),
         *_oasis_event_rows(matrix, truth_events, unit=unit),
     ]
+
+
+DiagnosticResult = tuple[str, list[dict[str, Any]]]
+
+
+def _run_diagnostic_task(
+    unit: DiagnosticUnit,
+    *,
+    baseline: str,
+    config: Mapping[str, Any],
+    output_dir: Path,
+) -> DiagnosticResult:
+    print(f"[{baseline}] worker starting diagnostic unit: {unit.unit_id}", flush=True)
+    return unit.unit_id, _run_unit(
+        unit,
+        baseline=baseline,
+        config=config,
+        output_dir=output_dir,
+    )
+
+
+def _iter_diagnostic_results(
+    worker: Callable[[DiagnosticUnit], DiagnosticResult],
+    units: Sequence[DiagnosticUnit],
+    *,
+    n_jobs: int,
+) -> Iterator[DiagnosticResult]:
+    if not units:
+        return
+    if n_jobs == 1:
+        yield from map(worker, units)
+        return
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        yield from executor.map(worker, units, chunksize=1)
 
 
 def _cached_rows_valid(output_dir: Path, rows: Sequence[Mapping[str, Any]]) -> bool:
@@ -1098,56 +1143,80 @@ def main() -> None:
     )
     store.initialize(resume=args.resume)
     progress_path = args.output_dir / "progress.json"
-    all_rows: list[dict[str, Any]] = []
-    completed_fits = 0
+    rows_by_unit: dict[str, list[dict[str, Any]]] = {}
+    pending_units: list[DiagnosticUnit] = []
+    for unit in units:
+        rows = store.load_rows(unit.unit_id) if args.resume else None
+        if rows is not None and _cached_rows_valid(args.output_dir, rows):
+            rows_by_unit[unit.unit_id] = rows
+            print(f"[{args.baseline}] loaded diagnostic unit: {unit.unit_id}", flush=True)
+        else:
+            pending_units.append(unit)
+    completed_units = len(rows_by_unit)
+    completed_fits = sum(
+        row.get("row_kind") == "graph"
+        for rows in rows_by_unit.values()
+        for row in rows
+    )
     _write_progress(
         progress_path,
         baseline=args.baseline,
         status="running",
-        completed_units=0,
+        completed_units=completed_units,
         total_units=len(units),
-        completed_fits=0,
+        completed_fits=completed_fits,
         total_fits=total_fits,
-        active_unit=None,
+        active_unit=(
+            pending_units[0].unit_id
+            if pending_units and args.n_jobs == 1
+            else f"parallel batch ({args.n_jobs} workers)"
+            if pending_units
+            else None
+        ),
     )
 
-    for index, unit in enumerate(units, start=1):
+    worker = partial(
+        _run_diagnostic_task,
+        baseline=args.baseline,
+        config=config,
+        output_dir=args.output_dir,
+    )
+    for pending_index, (unit_id, rows) in enumerate(
+        _iter_diagnostic_results(worker, pending_units, n_jobs=args.n_jobs),
+        start=1,
+    ):
+        store.save_rows(unit_id, rows)
+        rows_by_unit[unit_id] = rows
+        completed_units += 1
+        completed_fits += len([row for row in rows if row.get("row_kind") == "graph"])
+        next_index = pending_index
+        active_unit = (
+            pending_units[next_index].unit_id
+            if next_index < len(pending_units) and args.n_jobs == 1
+            else f"parallel batch ({args.n_jobs} workers)"
+            if next_index < len(pending_units)
+            else None
+        )
         _write_progress(
             progress_path,
             baseline=args.baseline,
             status="running",
-            completed_units=index - 1,
+            completed_units=completed_units,
             total_units=len(units),
             completed_fits=completed_fits,
             total_fits=total_fits,
-            active_unit=unit.unit_id,
+            active_unit=active_unit,
         )
-        rows = store.load_rows(unit.unit_id) if args.resume else None
-        if rows is None or not _cached_rows_valid(args.output_dir, rows):
-            print(
-                f"[{args.baseline}] starting diagnostic unit {index}/{len(units)}: "
-                f"{unit.unit_id}",
-                flush=True,
-            )
-            rows = _run_unit(
-                unit,
-                baseline=args.baseline,
-                config=config,
-                output_dir=args.output_dir,
-            )
-            store.save_rows(unit.unit_id, rows)
-        else:
-            print(
-                f"[{args.baseline}] loaded diagnostic unit {index}/{len(units)}: "
-                f"{unit.unit_id}",
-                flush=True,
-            )
-        all_rows.extend(rows)
-        completed_fits += len([row for row in rows if row.get("row_kind") == "graph"])
         print(
-            format_progress(index, len(units), label="Full-analysis units"),
+            format_progress(
+                completed_units,
+                len(units),
+                label="Full-analysis units",
+            ),
             flush=True,
         )
+
+    all_rows = [row for unit in units for row in rows_by_unit[unit.unit_id]]
 
     if completed_fits != total_fits:
         raise RuntimeError(

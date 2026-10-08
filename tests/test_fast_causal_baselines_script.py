@@ -232,12 +232,30 @@ class FastCausalBaselineScriptTests(unittest.TestCase):
             "1",
             "--cgc-depths",
             "1,2,3",
+            "--n-jobs",
+            "4",
         ]
         with patch("sys.argv", argv):
             args = script.parse_args()
 
         self.assertEqual(args.cgc_tau, 1)
         self.assertEqual(args.cgc_depths, (1, 2, 3))
+        self.assertEqual(args.n_jobs, 4)
+
+    def test_parallel_map_preserves_task_order(self) -> None:
+        tasks = (
+            script.SimulationFitTask(0, "first", {}, "rise", None),
+            script.SimulationFitTask(1, "second", {}, "fall", None),
+        )
+
+        def worker(task):
+            return task.unit, [{"unit": task.unit}]
+
+        results = list(
+            script._iter_simulation_fit_results(worker, tasks, n_jobs=1)
+        )
+
+        self.assertEqual([unit for unit, _ in results], ["first", "second"])
 
 
 if __name__ == "__main__":
