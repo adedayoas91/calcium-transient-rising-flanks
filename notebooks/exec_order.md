@@ -17,10 +17,10 @@ Run the notebooks below from top to bottom. Required launch toggles are already 
 3. `notebooks/simulations/06_dynamic_extensions_run.ipynb` — runs the unique mixed-fall and hybrid/context simulation arms.
 4. `notebooks/simulations/c-GC.ipynb` — runs the c-GC simulation analyses and reviewer audits.
 5. `notebooks/simulations/c-GC-star.ipynb` — runs the c-GC* simulation analyses and reviewer audits.
-6. `notebooks/simulations/lpcmci.ipynb` — runs the LPCMCI PAG and latent-confounding comparisons.
-7. `notebooks/simulations/oasis.ipynb` — runs the OASIS event/preprocessing comparison.
-8. `notebooks/simulations/pcmciplus.ipynb` — runs the matched PCMCI+ analyses, hypotheses, and reviewer audits.
-9. `notebooks/simulations/var_granger.ipynb` — runs the matched VAR-Granger analyses, hypotheses, and reviewer audits.
+6. `notebooks/simulations/oasis.ipynb` — runs the OASIS event/preprocessing comparison.
+7. `notebooks/simulations/pcmciplus.ipynb` — runs the matched PCMCI+ analyses, hypotheses, and reviewer audits.
+8. `notebooks/simulations/var_granger.ipynb` — runs the matched VAR-Granger analyses, hypotheses, and reviewer audits.
+9. `notebooks/simulations/lpcmci.ipynb` — runs only the bounded LPCMCI latent-confounding sensitivity and the five-method aggregate.
 
 ## Motorneuron analysis
 
@@ -28,18 +28,18 @@ Run the notebooks below from top to bottom. Required launch toggles are already 
 11. `notebooks/motorneurons/Temporal_resolvability_screen.ipynb` — runs the descriptive temporal resolvability screen.
 12. `notebooks/motorneurons/c-GC_Motoneurons.ipynb` — runs the c-GC motorneuron analyses and reviewer audits.
 13. `notebooks/motorneurons/c-GC-star_Motoneurons.ipynb` — runs the c-GC* motorneuron analyses and reviewer audits.
-14. `notebooks/motorneurons/lpcmci.ipynb` — runs the LPCMCI motorneuron comparison.
-15. `notebooks/motorneurons/oasis.ipynb` — runs the OASIS motorneuron comparison.
-16. `notebooks/motorneurons/pcmciplus.ipynb` — runs the matched PCMCI+ motorneuron analyses and reviewer audits.
-17. `notebooks/motorneurons/var_granger.ipynb` — runs the matched VAR-Granger motorneuron analyses and reviewer audits.
+14. `notebooks/motorneurons/oasis.ipynb` — runs the OASIS motorneuron comparison.
+15. `notebooks/motorneurons/pcmciplus.ipynb` — runs the matched PCMCI+ motorneuron analyses and reviewer audits.
+16. `notebooks/motorneurons/var_granger.ipynb` — runs the matched VAR-Granger motorneuron analyses and reviewer audits.
 
 ## Final aggregation
 
-18. `notebooks/simulations/03_publication_gate_pipeline_run.ipynb` — runs empirical null controls, stability checks, and publication-readiness packaging while reusing the method results.
-19. `notebooks/simulations/02_saved_artifact_analysis_run.ipynb` — builds the final aggregate tables, statistical summaries, evidence package, and completion audit.
+17. `notebooks/simulations/03_publication_gate_pipeline_run.ipynb` — runs empirical null controls, stability checks, and publication-readiness packaging while reusing the method results.
+18. `notebooks/simulations/02_saved_artifact_analysis_run.ipynb` — builds the final aggregate tables, statistical summaries, evidence package, and completion audit.
 
 ## Not part of the canonical run
 
 - `notebooks/simulations/00_hyperparameter_timeseries_explorer.ipynb` — exploratory simulator inspection only.
 - `notebooks/simulations/01_dynamic_episodic_validation_run.ipynb` — standalone duplicate of the episodic grid run by the c-GC and c-GC* notebooks.
 - `notebooks/simulations/08_validation_campaign_run.ipynb` — alternative orchestration wrapper that overlaps the individual notebooks above.
+- `notebooks/motorneurons/lpcmci.ipynb` — documents the intentional exclusion of the unbounded motorneuron LPCMCI run and exits without fitting.

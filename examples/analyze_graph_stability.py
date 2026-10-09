@@ -15,7 +15,6 @@ import numpy as np
 
 DEFAULT_INPUT_DIR = Path("outputs/motorneurons")
 DEFAULT_OUTPUT_DIR = Path("outputs/graph_stability")
-DEFAULT_LPCMCI_INPUT_DIR = Path("outputs/validation_campaign/motorneurons_lpcmci")
 DEFAULT_OASIS_INPUT_DIR = Path("outputs/validation_campaign/motorneurons_oasis")
 
 METHOD_CACHE_FILES = (
@@ -410,7 +409,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
-        "--lpcmci-input-dir", type=Path, default=DEFAULT_LPCMCI_INPUT_DIR
+        "--lpcmci-input-dir",
+        type=Path,
+        default=None,
+        help="optional exploratory motorneuron LPCMCI output; excluded by default",
     )
     parser.add_argument("--oasis-input-dir", type=Path, default=DEFAULT_OASIS_INPUT_DIR)
     return parser.parse_args()
@@ -436,7 +438,11 @@ def main() -> None:
         json.dump(
             {
                 "input_dir": str(args.input_dir),
-                "lpcmci_input_dir": str(args.lpcmci_input_dir),
+                "lpcmci_input_dir": (
+                    None
+                    if args.lpcmci_input_dir is None
+                    else str(args.lpcmci_input_dir)
+                ),
                 "oasis_input_dir": str(args.oasis_input_dir),
                 "n_graph_rows": len(records),
                 "n_overlap_rows": len(overlaps),

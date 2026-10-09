@@ -35,18 +35,26 @@ class ValidationCampaignScriptTests(unittest.TestCase):
         for stage in stages:
             self.assertIn("--resume", stage.command)
 
-        baselines = {
-            stage.name: stage.command
-            for stage in stages
-            if stage.name in {"lpcmci_simulation", "oasis_simulation"}
-        }
-        for command in baselines.values():
-            self.assertIn("--n-runs-outer", command)
-            self.assertIn("10", command)
-            self.assertIn("--n-seeds", command)
-            self.assertIn("20", command)
-            self.assertIn("--n-steps", command)
-            self.assertIn("3000", command)
+        by_name = {stage.name: stage.command for stage in stages}
+        oasis = by_name["oasis_simulation"]
+        self.assertIn("--n-runs-outer", oasis)
+        self.assertIn("10", oasis)
+        self.assertIn("--n-seeds", oasis)
+        self.assertIn("20", oasis)
+        self.assertIn("--n-steps", oasis)
+        self.assertIn("3000", oasis)
+
+        lpcmci = by_name["lpcmci_confounding"]
+        self.assertIn("examples/run_fast_causal_baselines.py", lpcmci)
+        self.assertIn("confounding", lpcmci)
+        self.assertIn("native,shared_observation_noise,latent_common_driver", lpcmci)
+        self.assertIn("--max-lag", lpcmci)
+        self.assertIn("1", lpcmci)
+        self.assertIn("--n-seeds", lpcmci)
+        self.assertIn("20", lpcmci)
+        self.assertIn("--n-steps", lpcmci)
+        self.assertIn("1500", lpcmci)
+        self.assertNotIn("--n-runs-outer", lpcmci)
 
     def test_only_complete_summary_is_skippable(self) -> None:
         script = _load_script_module()

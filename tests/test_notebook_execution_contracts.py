@@ -31,17 +31,12 @@ RUNNER_NOTEBOOKS = {
         "examples/analyze_episodic_effective_samples.py",
     },
     "simulations/lpcmci.ipynb": {
-        "examples/simulation_baselines.py",
-        "examples/simulation_baseline_diagnostics.py",
         "examples/run_fast_causal_baselines.py",
         "examples/analyze_matched_confounding_benchmark.py",
     },
     "simulations/oasis.ipynb": {
         "examples/simulation_baselines.py",
         "examples/simulation_baseline_diagnostics.py",
-    },
-    "motorneurons/lpcmci.ipynb": {
-        "examples/empirical_baselines.py",
     },
     "motorneurons/oasis.ipynb": {
         "examples/empirical_baselines.py",
@@ -147,15 +142,14 @@ CANONICAL_NOTEBOOK_ORDER = (
     "simulations/06_dynamic_extensions_run.ipynb",
     "simulations/c-GC.ipynb",
     "simulations/c-GC-star.ipynb",
-    "simulations/lpcmci.ipynb",
     "simulations/oasis.ipynb",
     "simulations/pcmciplus.ipynb",
     "simulations/var_granger.ipynb",
+    "simulations/lpcmci.ipynb",
     "motorneurons/fdr_reestimation.ipynb",
     "motorneurons/Temporal_resolvability_screen.ipynb",
     "motorneurons/c-GC_Motoneurons.ipynb",
     "motorneurons/c-GC-star_Motoneurons.ipynb",
-    "motorneurons/lpcmci.ipynb",
     "motorneurons/oasis.ipynb",
     "motorneurons/pcmciplus.ipynb",
     "motorneurons/var_granger.ipynb",
@@ -163,9 +157,8 @@ CANONICAL_NOTEBOOK_ORDER = (
     "simulations/02_saved_artifact_analysis_run.ipynb",
 )
 READY_TO_RUN_TOGGLES = {
-    "simulations/lpcmci.ipynb": "RUN_LPCMCI",
+    "simulations/lpcmci.ipynb": "RUN_CONFOUNDING_SENSITIVITY",
     "simulations/oasis.ipynb": "RUN_OASIS",
-    "motorneurons/lpcmci.ipynb": "RUN_LPCMCI",
     "motorneurons/oasis.ipynb": "RUN_OASIS",
     "simulations/pcmciplus.ipynb": "RUN_PCMCIPLUS",
     "simulations/var_granger.ipynb": "RUN_VAR_GRANGER",
@@ -183,7 +176,6 @@ PORTABLE_RUNNER_NOTEBOOKS = (
     "simulations/lpcmci.ipynb",
     "simulations/oasis.ipynb",
     "motorneurons/fdr_reestimation.ipynb",
-    "motorneurons/lpcmci.ipynb",
     "motorneurons/oasis.ipynb",
     "simulations/pcmciplus.ipynb",
     "simulations/var_granger.ipynb",
@@ -224,6 +216,7 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 "simulations/00_hyperparameter_timeseries_explorer.ipynb",
                 "simulations/01_dynamic_episodic_validation_run.ipynb",
                 "simulations/08_validation_campaign_run.ipynb",
+                "motorneurons/lpcmci.ipynb",
             }
         )
         discovered = {
@@ -247,7 +240,7 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 NOTEBOOK_ROOT / "simulations" / "02_saved_artifact_analysis_run.ipynb"
             )
         )
-        self.assertIn("--lpcmci-input-dir", source)
+        self.assertNotIn("--lpcmci-input-dir", source)
         self.assertIn("--oasis-input-dir", source)
         self.assertNotIn("rising_flanks_weighted_adjacency_matrices.pkl", source)
 
@@ -597,25 +590,29 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 self.assertEqual(find_package_root(outer_root), package_root)
 
     def test_baseline_notebooks_use_the_cgc_input_contracts(self) -> None:
-        for name in ("lpcmci.ipynb", "oasis.ipynb"):
-            simulation_source = "\n".join(
-                _code_cells(NOTEBOOK_ROOT / "simulations" / name)
-            )
-            motorneuron_source = "\n".join(
-                _code_cells(NOTEBOOK_ROOT / "motorneurons" / name)
-            )
-            with self.subTest(notebook=f"simulations/{name}"):
-                self.assertIn("N_RUNS_OUTER = 10", simulation_source)
-                self.assertIn("N_SEEDS = 20", simulation_source)
-                self.assertIn("N_STEPS = 3000", simulation_source)
-                self.assertIn("N_NULL = 6", simulation_source)
-                self.assertIn(
-                    "examples/simulation_baseline_diagnostics.py",
-                    simulation_source,
-                )
-            with self.subTest(notebook=f"motorneurons/{name}"):
-                self.assertIn("FLUO_TYPES = 'dff,f_smooth'", motorneuron_source)
-                self.assertNotIn("--cases", motorneuron_source)
+        simulation_source = "\n".join(
+            _code_cells(NOTEBOOK_ROOT / "simulations" / "oasis.ipynb")
+        )
+        motorneuron_source = "\n".join(
+            _code_cells(NOTEBOOK_ROOT / "motorneurons" / "oasis.ipynb")
+        )
+        self.assertIn("N_RUNS_OUTER = 10", simulation_source)
+        self.assertIn("N_SEEDS = 20", simulation_source)
+        self.assertIn("N_STEPS = 3000", simulation_source)
+        self.assertIn("N_NULL = 6", simulation_source)
+        self.assertIn("examples/simulation_baseline_diagnostics.py", simulation_source)
+        self.assertIn("FLUO_TYPES = 'dff,f_smooth'", motorneuron_source)
+        self.assertNotIn("--cases", motorneuron_source)
+
+        lpcmci_source = "\n".join(
+            _code_cells(NOTEBOOK_ROOT / "simulations" / "lpcmci.ipynb")
+        )
+        self.assertNotIn("examples/simulation_baselines.py", lpcmci_source)
+        self.assertNotIn("examples/simulation_baseline_diagnostics.py", lpcmci_source)
+        self.assertIn("N_SEEDS = 20", lpcmci_source)
+        self.assertIn("N_STEPS = 1500", lpcmci_source)
+        self.assertIn("MAX_LAG = 1", lpcmci_source)
+        self.assertIn("total_fits =", lpcmci_source)
 
         oasis_source = "\n".join(
             _code_cells(NOTEBOOK_ROOT / "simulations" / "oasis.ipynb")
@@ -627,20 +624,19 @@ class NotebookExecutionContractTests(unittest.TestCase):
         self.assertIn("--restart-incompatible-resume", oasis_source)
 
     def test_lpcmci_notebooks_parallelize_only_independent_fits(self) -> None:
-        for relative_path in (
-            "simulations/lpcmci.ipynb",
-            "motorneurons/lpcmci.ipynb",
-        ):
-            source = "\n".join(_code_cells(NOTEBOOK_ROOT / relative_path))
-            with self.subTest(notebook=relative_path):
-                self.assertIn("RF_LPCMCI_N_JOBS", source)
-                self.assertIn("'--n-jobs', str(N_JOBS)", source)
-                self.assertIn("RUNNER_ENV[thread_variable] = '1'", source)
-                if relative_path.startswith("simulations/"):
-                    self.assertGreaterEqual(
-                        source.count("'--n-jobs', str(N_JOBS)"),
-                        2,
-                    )
+        source = "\n".join(
+            _code_cells(NOTEBOOK_ROOT / "simulations/lpcmci.ipynb")
+        )
+        self.assertIn("RF_LPCMCI_N_JOBS", source)
+        self.assertIn("N_JOBS = min(4, requested_workers)", source)
+        self.assertIn("'--n-jobs', str(N_JOBS)", source)
+        self.assertIn("RUNNER_ENV[thread_variable] = '1'", source)
+
+        motor_source = "\n".join(
+            _code_cells(NOTEBOOK_ROOT / "motorneurons/lpcmci.ipynb")
+        )
+        self.assertIn("RUN_LPCMCI = False", motor_source)
+        self.assertNotIn("subprocess", motor_source)
 
     def test_baseline_notebooks_expose_each_reference_analysis_section(self) -> None:
         required_sections = (
@@ -650,14 +646,12 @@ class NotebookExecutionContractTests(unittest.TestCase):
             "Ipsilateral consistency",
             "H4 — robustness to noise and frame-rate reduction",
         )
-        for name in ("lpcmci.ipynb", "oasis.ipynb"):
-            text = (NOTEBOOK_ROOT / "simulations" / name).read_text()
-            with self.subTest(notebook=name):
-                for section in required_sections:
-                    self.assertIn(section, text)
-                self.assertIn("null_comparator_rows.csv", text)
-                self.assertIn("wic_delta_by_condition.csv", text)
-                self.assertIn("robustness_framerate.csv", text)
+        text = (NOTEBOOK_ROOT / "simulations" / "oasis.ipynb").read_text()
+        for section in required_sections:
+            self.assertIn(section, text)
+        self.assertIn("null_comparator_rows.csv", text)
+        self.assertIn("wic_delta_by_condition.csv", text)
+        self.assertIn("robustness_framerate.csv", text)
 
         oasis_text = (NOTEBOOK_ROOT / "simulations" / "oasis.ipynb").read_text()
         self.assertIn("kept separate for downstream c-GC and c-GC*", oasis_text)

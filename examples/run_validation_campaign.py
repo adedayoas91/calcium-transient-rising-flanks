@@ -25,7 +25,7 @@ CAMPAIGN_STAGES = (
     "empirical_fdr_unadjusted",
     "threshold_calibration",
     "mixed_fall",
-    "lpcmci_simulation",
+    "lpcmci_confounding",
     "oasis_simulation",
     "hybrid_event",
     "adaptive_onset",
@@ -98,7 +98,7 @@ def build_stages(
     unadjusted_dir = output_root / "empirical_fdr" / "unadjusted"
     threshold_dir = output_root / "threshold_calibration"
     mixed_fall_dir = output_root / "mixed_fall"
-    lpcmci_dir = output_root / "lpcmci_simulation"
+    lpcmci_dir = output_root / "lpcmci_confounding"
     oasis_dir = output_root / "oasis_simulation"
     hybrid_dir = output_root / "hybrid_event"
     onset_dir = output_root / "adaptive_onset"
@@ -155,22 +155,28 @@ def build_stages(
             mixed_fall_dir / "summary.json",
         ),
         Stage(
-            "lpcmci_simulation",
+            "lpcmci_confounding",
             (
                 python,
-                "examples/simulation_baselines.py",
-                "--components",
+                "examples/run_fast_causal_baselines.py",
+                "--dataset",
+                "simulations",
+                "--algorithm",
                 "lpcmci",
                 "--representations",
                 "full,deconvolved,rise,fall,fall_residual",
-                "--n-runs-outer",
-                "10",
+                "--simulation-kinds",
+                "confounding",
+                "--conditions",
+                "native,shared_observation_noise,latent_common_driver",
+                "--max-lag",
+                "1",
                 "--n-seeds",
                 "20",
                 "--n-steps",
-                "3000",
-                "--n-cgc-surrogates",
-                str(n_surrogates),
+                "1500",
+                "--n-jobs",
+                "4",
                 "--output-dir",
                 str(lpcmci_dir),
                 "--resume",
