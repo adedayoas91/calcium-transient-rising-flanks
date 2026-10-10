@@ -28,7 +28,7 @@ Run the notebooks below from top to bottom. Required launch toggles are already 
 11. `notebooks/motorneurons/Temporal_resolvability_screen.ipynb` — runs the descriptive temporal resolvability screen.
 12. `notebooks/motorneurons/c-GC_Motoneurons.ipynb` — runs the c-GC motorneuron analyses and reviewer audits.
 13. `notebooks/motorneurons/c-GC-star_Motoneurons.ipynb` — runs the c-GC* motorneuron analyses and reviewer audits.
-14. `notebooks/motorneurons/oasis.ipynb` — runs the OASIS motorneuron comparison.
+14. `notebooks/motorneurons/oasis.ipynb` — runs OASIS preprocessing followed by c-GC, c-GC*, PCMCI+, and VAR.
 15. `notebooks/motorneurons/pcmciplus.ipynb` — runs the matched PCMCI+ motorneuron analyses and reviewer audits.
 16. `notebooks/motorneurons/var_granger.ipynb` — runs the matched VAR-Granger motorneuron analyses and reviewer audits.
 

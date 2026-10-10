@@ -549,6 +549,18 @@ class NotebookExecutionContractTests(unittest.TestCase):
                 self.assertIn("import oasis", source)
                 self.assertIn("uv sync --frozen --all-extras", source)
 
+    def test_motorneuron_oasis_runs_all_four_downstream_methods(self) -> None:
+        source = "\n".join(_code_cells(NOTEBOOK_ROOT / "motorneurons" / "oasis.ipynb"))
+        self.assertIn(
+            "OASIS_METHODS = 'cgc,cgc-star,pcmciplus,var-granger'",
+            source,
+        )
+        self.assertIn("'--oasis-methods', OASIS_METHODS", source)
+        self.assertIn(
+            "len(OASIS_OUTPUTS.split(',')) * len(OASIS_METHODS.split(','))",
+            source,
+        )
+
     def test_matched_notebooks_explain_primary_fit_count(self) -> None:
         for relative_path in (
             "simulations/c-GC.ipynb",

@@ -101,7 +101,7 @@ class EmpiricalBaselinesScriptTests(unittest.TestCase):
                 components=("oasis", "lpcmci"),
                 representations=("full", "rise"),
                 oasis_outputs=("spikes",),
-                cgc_methods=("cgc",),
+                oasis_methods=("cgc",),
             )
             for unit, relative in expected.items():
                 path = output_dir / relative
@@ -179,6 +179,149 @@ class EmpiricalBaselinesScriptTests(unittest.TestCase):
             script._stable_seed(10, "different-unit"),
         )
 
+    def test_oasis_method_extension_preserves_the_completed_cgc_run(self) -> None:
+        script = _load_script_module()
+        previous = {
+            "resume_schema_version": 2,
+            "cgc_methods": ["cgc", "cgc-star"],
+            "alpha": 0.05,
+            "max_lag": 3,
+        }
+        extended = {
+            "resume_schema_version": 3,
+            "oasis_methods": [
+                "cgc",
+                "cgc-star",
+                "pcmciplus",
+                "var-granger",
+            ],
+            "alpha": 0.05,
+            "max_lag": 3,
+        }
+
+        self.assertTrue(script._resume_config_compatible(previous, extended))
+        self.assertFalse(
+            script._resume_config_compatible(
+                previous,
+                {**extended, "max_lag": 2},
+            )
+        )
+
+    def test_oasis_graph_supports_pcmciplus_and_var_artifacts(self) -> None:
+        script = _load_script_module()
+        record = {
+            "fluo_type": "dff",
+            "recording": "F3T1",
+            "fish": 3,
+            "trial": 1,
+            "traces": np.arange(80, dtype=float).reshape(4, 20),
+            "mid": 2,
+            "input_digest": "abc",
+        }
+
+        class FakePCMCIResult:
+            cond_ind_test = "FakeParCorr"
+            assumptions = ("causal sufficiency",)
+
+            def __init__(self):
+                self.graph = np.full((4, 4, 2), "", dtype="<U3")
+                self.graph[0, 1, 1] = "-->"
+                self.p_matrix = np.ones((4, 4, 2))
+                self.p_matrix[0, 1, 1] = 0.01
+                self.val_matrix = np.zeros((4, 4, 2))
+                self.val_matrix[0, 1, 1] = -0.75
+
+            def lagged_adjacency(self):
+                adjacency = np.zeros((4, 4), dtype=bool)
+                adjacency[0, 1] = True
+                return adjacency
+
+        class FakePCMCI:
+            def __init__(self, **_kwargs):
+                pass
+
+            def fit(self, _traces):
+                return FakePCMCIResult()
+
+        class FakeVAR:
+            def __init__(self, **_kwargs):
+                pass
+
+            def fit(self, _traces):
+                adjacency = np.zeros((4, 4), dtype=bool)
+                adjacency[1, 2] = True
+                scores = np.zeros((4, 4), dtype=float)
+                scores[1, 2] = 0.5
+                return SimpleNamespace(
+                    adjacency=adjacency,
+                    p_values=np.where(adjacency, 0.01, 1.0),
+                    scores=scores,
+                    best_lags=np.where(adjacency, 1, 0),
+                    coefficients=np.zeros((4, 4, 1)),
+                    companion_spectral_radius=0.8,
+                    stable=True,
+                    assumptions=("linear stationary VAR dynamics",),
+                )
+
+        script.PCMCIPlusAdapter = FakePCMCI
+        script.VARGrangerAdapter = FakeVAR
+        with tempfile.TemporaryDirectory() as temporary:
+            output_dir = Path(temporary)
+            script._atomic_write_npz(
+                script._oasis_artifact_path(output_dir, record),
+                denoised=record["traces"] / 2,
+                spikes=(record["traces"] > 10).astype(float),
+                baseline=np.zeros(4),
+                penalty_lambda=np.ones(4),
+                ar_params_json=np.asarray("{}"),
+                input_digest=np.asarray(record["input_digest"]),
+            )
+            pcmci_row = script.run_oasis_graph(
+                record,
+                output_dir=output_dir,
+                method="pcmciplus",
+                oasis_output="spikes",
+                max_lag=1,
+                n_surrogates=10,
+                alpha=0.05,
+                seed=10,
+            )
+            var_row = script.run_oasis_graph(
+                record,
+                output_dir=output_dir,
+                method="var-granger",
+                oasis_output="denoised",
+                max_lag=1,
+                n_surrogates=10,
+                alpha=0.05,
+                seed=10,
+            )
+            with np.load(pcmci_row["artifact_path"], allow_pickle=False) as payload:
+                self.assertTrue(
+                    {
+                        "graph",
+                        "p_matrix",
+                        "val_matrix",
+                        "adjacency",
+                        "retained_scores",
+                    }.issubset(payload.files)
+                )
+            with np.load(var_row["artifact_path"], allow_pickle=False) as payload:
+                self.assertTrue(
+                    {
+                        "adjacency",
+                        "p_values",
+                        "scores",
+                        "retained_scores",
+                        "coefficients",
+                    }.issubset(payload.files)
+                )
+
+        self.assertEqual(pcmci_row["retained_edges"], 1)
+        self.assertEqual(var_row["retained_edges"], 1)
+        self.assertIn("causal", pcmci_row["output_semantics"])
+        self.assertIn("predictive", var_row["output_semantics"])
+
     def test_method_units_write_reloadable_artifacts_without_optional_packages(self) -> None:
         script = _load_script_module()
         record = {
@@ -215,6 +358,7 @@ class EmpiricalBaselinesScriptTests(unittest.TestCase):
                 adjacency[0, 1] = True
                 return SimpleNamespace(
                     adjacency=adjacency,
+                    scores=adjacency.astype(float),
                     retained_scores=adjacency.astype(float),
                     p_values=np.full((size, size), 0.5),
                     best_lags=np.zeros((size, size), dtype=int),

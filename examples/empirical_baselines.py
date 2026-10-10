@@ -1,7 +1,10 @@
-"""Run resumable OASIS and LPCMCI baselines on motoneuron recordings.
+"""Run resumable OASIS and LPCMCI analyses on motoneuron recordings.
 
 OASIS is a fluorescence-to-event preprocessing baseline, not a causal learner.
-Its spike and denoised outputs are passed to matched c-GC/c-GC* estimators.
+Its spike and denoised outputs are passed to c-GC, c-GC*, PCMCI+, and
+conditional VAR-Granger on the same time axis and lag design. The first three
+are causal structure learning methods; VAR-Granger estimates conditional
+lagged predictability.
 LPCMCI retains its raw PAG, p-value, and test-statistic tensors; the separate
 lagged skeleton is explicitly lossy and has no orientation interpretation. The
 input records come from the exact combined dataframe read by both motoneuron
@@ -28,9 +31,12 @@ from calcium_transient_rising_flank import (
     CausalisedGC,
     LPCMCIAdapter,
     OASISDeconvolver,
+    PCMCIPlusAdapter,
+    VARGrangerAdapter,
     array_input_digest,
     build_representations,
     graph_summary,
+    project_significant_lagged_directed_graph,
 )
 from calcium_transient_rising_flank.checkpointing import format_progress
 
@@ -49,7 +55,12 @@ REPRESENTATION_CHOICES = (
     "fall_residual",
 )
 OASIS_OUTPUT_CHOICES = ("spikes", "denoised")
-CGC_METHOD_CHOICES = ("cgc", "cgc-star")
+OASIS_GRAPH_METHOD_CHOICES = (
+    "cgc",
+    "cgc-star",
+    "pcmciplus",
+    "var-granger",
+)
 PROGRESS_FILE = "progress.json"
 OASIS_PARTIAL_FILE = "oasis_preprocessing_rows.partial.csv"
 GRAPH_PARTIAL_FILE = "graph_summary_rows.partial.csv"
@@ -235,6 +246,11 @@ def _valid_unit_artifact(
             "best_lags",
             "input_digest",
         }
+        method = unit.split("|", maxsplit=2)[1]
+        if method == "pcmciplus":
+            required.update({"graph", "p_matrix", "val_matrix"})
+        elif method == "var-granger":
+            required.update({"scores", "coefficients"})
     elif unit.startswith("lpcmci|"):
         required = {
             "graph",
@@ -416,6 +432,200 @@ def run_oasis_transform(
     }
 
 
+def _collapse_pcmci_lagged_links(
+    graph: np.ndarray,
+    p_matrix: np.ndarray,
+    val_matrix: np.ndarray,
+    *,
+    alpha: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Collapse significant lagged PCMCI+ links to one value per pair."""
+
+    marks = np.asarray(graph)
+    probabilities = np.asarray(p_matrix, dtype=float)
+    values = np.asarray(val_matrix, dtype=float)
+    if (
+        marks.ndim != 3
+        or probabilities.shape != marks.shape
+        or values.shape != marks.shape
+    ):
+        raise ValueError(
+            "PCMCI+ graph, p_matrix, and val_matrix must have matching shapes"
+        )
+    n_nodes = marks.shape[0]
+    scores = np.zeros((n_nodes, n_nodes), dtype=float)
+    p_values = np.ones((n_nodes, n_nodes), dtype=float)
+    best_lags = np.zeros((n_nodes, n_nodes), dtype=int)
+    if marks.shape[2] <= 1:
+        return scores, p_values, best_lags
+
+    directed = (marks[:, :, 1:] == "-->") & (probabilities[:, :, 1:] <= alpha)
+    absolute_values = np.abs(values[:, :, 1:])
+    for source, target in np.argwhere(np.any(directed, axis=2)):
+        eligible_lags = np.flatnonzero(directed[source, target])
+        selected = eligible_lags[
+            int(np.argmax(absolute_values[source, target, eligible_lags]))
+        ]
+        scores[source, target] = absolute_values[source, target, selected]
+        p_values[source, target] = probabilities[source, target, selected + 1]
+        best_lags[source, target] = int(selected + 1)
+    np.fill_diagonal(scores, 0.0)
+    np.fill_diagonal(p_values, 1.0)
+    np.fill_diagonal(best_lags, 0)
+    return scores, p_values, best_lags
+
+
+def _fit_oasis_graph(
+    values: np.ndarray,
+    *,
+    method: str,
+    max_lag: int,
+    n_surrogates: int,
+    alpha: float,
+    random_state: int,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    dict[str, np.ndarray],
+    dict[str, Any],
+]:
+    """Fit one downstream graph method and return a common artifact contract."""
+
+    if method in {"cgc", "cgc-star"}:
+        result = CausalisedGC(
+            max_lag=max_lag,
+            n_surrogates=n_surrogates,
+            alpha=alpha,
+            fdr=True,
+            event_mode="physical",
+            method=method,
+            simulation=False,
+            random_state=random_state,
+        ).fit(values)
+        adjacency = np.asarray(result.adjacency, dtype=bool)
+        retained_scores = np.asarray(result.retained_scores, dtype=float)
+        p_values = np.asarray(result.p_values, dtype=float)
+        best_lags = np.asarray(result.best_lags, dtype=int)
+        arrays = {"scores": np.asarray(result.scores, dtype=float)}
+        metadata = {
+            "output_semantics": (
+                "directed lagged causal structure after OASIS preprocessing"
+            ),
+            "projection": "BH-filtered directed lagged links",
+            "conditional_independence_test": (
+                "absolute unconditional and residualized lagged correlation"
+            ),
+            "multiple_testing": (
+                "finite-sample add-one permutation probabilities with BH across "
+                "ordered pairs"
+            ),
+            "n_estimator_surrogates": n_surrogates,
+            "assumptions": (
+                "causal structure relation on the supplied OASIS input under the "
+                "c-GC/c-GC* assumptions"
+            ),
+        }
+        return (
+            adjacency,
+            retained_scores,
+            p_values,
+            best_lags,
+            arrays,
+            metadata,
+        )
+
+    if method == "pcmciplus":
+        result = PCMCIPlusAdapter(
+            tau_max=max_lag,
+            run_kwargs={
+                "tau_min": 0,
+                "pc_alpha": alpha,
+                "fdr_method": "fdr_bh",
+            },
+        ).fit(values)
+        adjacency = project_significant_lagged_directed_graph(
+            result.graph,
+            result.p_matrix,
+            alpha,
+        )
+        scores, p_values, best_lags = _collapse_pcmci_lagged_links(
+            result.graph,
+            result.p_matrix,
+            result.val_matrix,
+            alpha=alpha,
+        )
+        retained_scores = np.where(adjacency, scores, 0.0)
+        arrays = {
+            "graph": np.asarray(result.graph),
+            "p_matrix": np.asarray(result.p_matrix, dtype=float),
+            "val_matrix": np.asarray(result.val_matrix, dtype=float),
+            "native_adjacency": np.asarray(result.lagged_adjacency(), dtype=bool),
+        }
+        metadata = {
+            "output_semantics": (
+                "directed lagged causal graph after OASIS preprocessing"
+            ),
+            "projection": "BH-filtered directed lagged links",
+            "conditional_independence_test": result.cond_ind_test,
+            "multiple_testing": (
+                "Tigramite fdr_bh adjustment with adjusted p <= alpha in the "
+                "lagged directed projection"
+            ),
+            "n_estimator_surrogates": None,
+            "assumptions": " | ".join(result.assumptions),
+        }
+        return (
+            adjacency,
+            retained_scores,
+            p_values,
+            best_lags,
+            arrays,
+            metadata,
+        )
+
+    if method == "var-granger":
+        result = VARGrangerAdapter(
+            max_lag=max_lag,
+            alpha=alpha,
+            fdr=True,
+        ).fit(values)
+        adjacency = np.asarray(result.adjacency, dtype=bool)
+        scores = np.asarray(result.scores, dtype=float)
+        retained_scores = np.where(adjacency, scores, 0.0)
+        arrays = {
+            "scores": scores,
+            "coefficients": np.asarray(result.coefficients, dtype=float),
+            "companion_spectral_radius": np.asarray(
+                result.companion_spectral_radius,
+                dtype=float,
+            ),
+        }
+        metadata = {
+            "output_semantics": (
+                "conditional VAR-Granger predictive adjacency after OASIS preprocessing"
+            ),
+            "projection": "none",
+            "conditional_independence_test": "nested VAR omnibus F-test",
+            "multiple_testing": "BH across ordered source-target pairs",
+            "n_estimator_surrogates": None,
+            "companion_spectral_radius": result.companion_spectral_radius,
+            "var_stable": result.stable,
+            "assumptions": " | ".join(result.assumptions),
+        }
+        return (
+            adjacency,
+            retained_scores,
+            np.asarray(result.p_values, dtype=float),
+            np.asarray(result.best_lags, dtype=int),
+            arrays,
+            metadata,
+        )
+
+    raise ValueError(f"unsupported OASIS graph method: {method}")
+
+
 def run_oasis_graph(
     record: dict[str, Any],
     *,
@@ -431,16 +641,21 @@ def run_oasis_graph(
     with np.load(source_path, allow_pickle=False) as source:
         values = np.asarray(source[oasis_output], dtype=float)
     unit = _oasis_graph_unit(record, method=method, oasis_output=oasis_output)
-    result = CausalisedGC(
+    (
+        adjacency,
+        retained_scores,
+        p_values,
+        best_lags,
+        method_arrays,
+        method_metadata,
+    ) = _fit_oasis_graph(
+        values,
+        method=method,
         max_lag=max_lag,
         n_surrogates=n_surrogates,
         alpha=alpha,
-        fdr=True,
-        event_mode="physical",
-        method=method,
-        simulation=False,
         random_state=_stable_seed(seed, unit),
-    ).fit(values)
+    )
     artifact = _oasis_graph_artifact_path(
         output_dir,
         record,
@@ -449,11 +664,12 @@ def run_oasis_graph(
     )
     _atomic_write_npz(
         artifact,
-        adjacency=np.asarray(result.adjacency, dtype=bool),
-        retained_scores=np.asarray(result.retained_scores, dtype=float),
-        p_values=np.asarray(result.p_values, dtype=float),
-        best_lags=np.asarray(result.best_lags, dtype=int),
+        adjacency=adjacency,
+        retained_scores=retained_scores,
+        p_values=p_values,
+        best_lags=best_lags,
         input_digest=np.asarray(record["input_digest"]),
+        **method_arrays,
     )
     return {
         "unit": unit,
@@ -464,16 +680,14 @@ def run_oasis_graph(
         "trial": record["trial"],
         "method": method,
         "representation": f"oasis_{oasis_output}",
-        "output_semantics": "directed predictive adjacency after OASIS preprocessing",
-        "projection": "none",
         "artifact_path": str(artifact),
         "alpha": alpha,
         "fdr": True,
-        "n_estimator_surrogates": n_surrogates,
         "max_lag": max_lag,
         "input_digest": record["input_digest"],
         "input_contract": "motoneuron-cgc-dataframe-v1",
-        **graph_summary(result.retained_scores, record["mid"], binary=False),
+        **method_metadata,
+        **graph_summary(retained_scores, record["mid"], binary=False),
     }
 
 
@@ -578,7 +792,7 @@ def _expected_units(
     components: Sequence[str],
     representations: Sequence[str],
     oasis_outputs: Sequence[str],
-    cgc_methods: Sequence[str],
+    oasis_methods: Sequence[str],
 ) -> dict[str, Path]:
     expected: dict[str, Path] = {}
     for record in records:
@@ -586,7 +800,7 @@ def _expected_units(
             expected[_oasis_transform_unit(record)] = _oasis_artifact_path(
                 Path("."), record
             )
-            for method in cgc_methods:
+            for method in oasis_methods:
                 for oasis_output in oasis_outputs:
                     expected[
                         _oasis_graph_unit(
@@ -645,8 +859,35 @@ def _recover_completed_units(
         if transform_unit not in complete:
             complete.remove(unit)
     recovered_oasis = [row for row in oasis_rows if row.get("unit") in complete]
-    recovered_graph = [row for row in graph_rows if row.get("unit") in complete]
+    recovered_graph = []
+    for row in graph_rows:
+        if row.get("unit") not in complete:
+            continue
+        recovered = dict(row)
+        if recovered.get("method") in {"cgc", "cgc-star"}:
+            recovered["output_semantics"] = (
+                "directed lagged causal structure after OASIS preprocessing"
+            )
+            recovered["projection"] = "BH-filtered directed lagged links"
+        recovered_graph.append(recovered)
     return recovered_oasis, recovered_graph, complete
+
+
+def _resume_config_compatible(
+    saved_config: dict[str, Any],
+    requested_config: dict[str, Any],
+) -> bool:
+    """Allow a completed c-GC-only OASIS run to grow to four methods."""
+
+    saved = dict(saved_config)
+    requested = dict(requested_config)
+    saved_methods = tuple(saved.pop("oasis_methods", saved.pop("cgc_methods", ())))
+    requested_methods = tuple(
+        requested.pop("oasis_methods", requested.pop("cgc_methods", ()))
+    )
+    saved.pop("resume_schema_version", None)
+    requested.pop("resume_schema_version", None)
+    return saved == requested and set(saved_methods).issubset(requested_methods)
 
 
 def _write_progress(
@@ -688,7 +929,16 @@ def parse_args() -> argparse.Namespace:
         default="full,deconvolved,rise,fall,fall_residual",
     )
     parser.add_argument("--oasis-outputs", default="spikes,denoised")
-    parser.add_argument("--cgc-methods", default="cgc,cgc-star")
+    parser.add_argument(
+        "--oasis-methods",
+        "--cgc-methods",
+        dest="oasis_methods",
+        default=",".join(OASIS_GRAPH_METHOD_CHOICES),
+        help=(
+            "Downstream graph methods for each OASIS output. "
+            "--cgc-methods is retained as a compatibility alias."
+        ),
+    )
     parser.add_argument("--max-lag", type=int, default=3)
     parser.add_argument("--n-cgc-surrogates", type=int, default=1000)
     parser.add_argument("--alpha", type=float, default=0.05)
@@ -728,10 +978,10 @@ def main() -> None:
         choices=OASIS_OUTPUT_CHOICES,
         name="OASIS output",
     )
-    cgc_methods = _parse_choices(
-        args.cgc_methods,
-        choices=CGC_METHOD_CHOICES,
-        name="c-GC method",
+    oasis_methods = _parse_choices(
+        args.oasis_methods,
+        choices=OASIS_GRAPH_METHOD_CHOICES,
+        name="OASIS graph method",
     )
     if args.max_lag < 1 or args.lpcmci_tau_max < 1:
         raise SystemExit("lag limits must be positive")
@@ -748,7 +998,7 @@ def main() -> None:
         recordings=recordings,
     )
     config = {
-        "resume_schema_version": 2,
+        "resume_schema_version": 3,
         "input_contract": "motoneuron-cgc-dataframe-v1",
         "data_file": str(args.data_file),
         "data_file_sha256": _sha256(args.data_file),
@@ -757,7 +1007,7 @@ def main() -> None:
         "components": list(components),
         "representations": list(representations),
         "oasis_outputs": list(oasis_outputs),
-        "cgc_methods": list(cgc_methods),
+        "oasis_methods": list(oasis_methods),
         "max_lag": args.max_lag,
         "n_cgc_surrogates": args.n_cgc_surrogates,
         "alpha": args.alpha,
@@ -779,7 +1029,7 @@ def main() -> None:
         components=components,
         representations=representations,
         oasis_outputs=oasis_outputs,
-        cgc_methods=cgc_methods,
+        oasis_methods=oasis_methods,
     )
     expected_count = len(expected_relative)
     previous_active_unit: str | None = None
@@ -790,7 +1040,7 @@ def main() -> None:
     )
     if args.resume and progress_path.exists():
         progress = json.loads(progress_path.read_text())
-        if progress.get("config") != config:
+        if not _resume_config_compatible(progress.get("config", {}), config):
             raise SystemExit("resume configuration does not match the saved run")
         previous_active_unit = progress.get("active_unit")
         oasis_rows, graph_rows, completed = _recover_completed_units(
@@ -883,7 +1133,7 @@ def main() -> None:
                     + f" | completed {transform_unit}",
                     flush=True,
                 )
-            for method in cgc_methods:
+            for method in oasis_methods:
                 for oasis_output in oasis_outputs:
                     unit = _oasis_graph_unit(
                         record,
@@ -1036,7 +1286,8 @@ def main() -> None:
     }
     if "oasis" in components:
         interpretation["oasis"] = (
-            "preprocessing baseline; no empirical event ground truth"
+            "preprocessing baseline followed by matched c-GC, c-GC*, PCMCI+, "
+            "and VAR fits; no empirical event ground truth"
         )
     if "lpcmci" in components:
         interpretation["lpcmci"] = (
