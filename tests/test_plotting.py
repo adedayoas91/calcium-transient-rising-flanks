@@ -1,3 +1,4 @@
+import pickle
 import unittest
 from pathlib import Path
 
@@ -43,6 +44,20 @@ class TopographicPlottingTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         plt.close("all")
+
+    def _load_fish3_trace2_topography(self) -> tuple[np.ndarray, np.ndarray]:
+        background_path = self.DATA_DIR / "fish3_trace2_background.npy"
+        centroids_path = self.DATA_DIR / "fish3_trace2_centroids.npy"
+        if background_path.exists() and centroids_path.exists():
+            return np.load(background_path), np.load(centroids_path)
+
+        with (self.DATA_DIR / "motoneurons" / "background_dict.pkl").open("rb") as file:
+            background = np.asarray(pickle.load(file)[(3, 2)])
+        with (
+            self.DATA_DIR / "motoneurons" / "cell_centers_removed_dict.pkl"
+        ).open("rb") as file:
+            centers = np.asarray(pickle.load(file)[(3, 2)])
+        return background, centers
 
     def test_topographic_graph_renders_without_mutating_scores(self) -> None:
         original = self.rise.copy()
@@ -109,8 +124,7 @@ class TopographicPlottingTests(unittest.TestCase):
         )
 
     def test_supplied_topography_arrays_are_compatible(self) -> None:
-        background = np.load(self.DATA_DIR / "fish3_trace2_background.npy")
-        centers = np.load(self.DATA_DIR / "fish3_trace2_centroids.npy")
+        background, centers = self._load_fish3_trace2_topography()
         matrix = np.zeros((centers.shape[0], centers.shape[0]))
 
         fig, axes = plot_topographic_pair(

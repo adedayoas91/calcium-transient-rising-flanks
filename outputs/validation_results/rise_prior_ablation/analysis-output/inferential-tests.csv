@@ -1,0 +1,13 @@
+family,condition,deadband,arm,metric,n_seeds,mean_difference,sd_difference,ci95_low,ci95_high,cohen_dz,p_exact,p_holm
+recovery_f1,clean,0,robust_hard,f1,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+recovery_f1,clean,0,soft_prior,f1,8,-0.03571428571428571,0.06613000712661081,-0.07142857142857142,0.0,-0.5400617248673217,0.5,1.0
+recovery_f1,clean,1,robust_hard,f1,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+recovery_f1,clean,1,soft_prior,f1,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+recovery_f1,lowrate_shared,0,robust_hard,f1,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+recovery_f1,lowrate_shared,0,soft_prior,f1,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+recovery_f1,lowrate_shared,1,robust_hard,f1,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+recovery_f1,lowrate_shared,1,soft_prior,f1,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+null_fpr,null_lowrate_shared,0,robust_hard,false_positive_rate,8,-0.003125000000000001,0.008838834764831846,-0.009375000000000003,0.0,-0.35355339059327384,1.0,1.0
+null_fpr,null_lowrate_shared,0,soft_prior,false_positive_rate,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+null_fpr,null_lowrate_shared,1,robust_hard,false_positive_rate,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0
+null_fpr,null_lowrate_shared,1,soft_prior,false_positive_rate,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0

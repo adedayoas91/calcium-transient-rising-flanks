@@ -1,0 +1,17 @@
+{
+  "added_edges_total": 0,
+  "all_saved_match_recomputed_raw_bh": true,
+  "alpha": 0.05,
+  "corrected_edges_mean": 30.791666666666668,
+  "corrected_edges_total": 739,
+  "graphs_with_changed_edges": 14,
+  "input_dir": "outputs/validation_campaign/empirical_fdr/bh/observed_graph_artifacts",
+  "interpretation": "The add-one audit is a deterministic reanalysis of saved p-value matrices. Resolution bounds do not establish graph stabilization.",
+  "n_graphs": 24,
+  "n_surrogates": 1000,
+  "removed_edges_total": 35,
+  "saved_corrected_jaccard_mean": 0.915247021653172,
+  "saved_edges_mean": 32.25,
+  "saved_edges_total": 774,
+  "status": "complete"
+}

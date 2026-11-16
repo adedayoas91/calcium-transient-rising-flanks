@@ -1,0 +1,204 @@
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+def _load_script_module():
+    path = Path(__file__).resolve().parents[1] / "examples" / (
+        "run_publication_gate_pipeline.py"
+    )
+    spec = importlib.util.spec_from_file_location("run_publication_gate_pipeline", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class PublicationGatePipelineScriptTests(unittest.TestCase):
+    def test_builds_ordered_publication_gate_commands(self) -> None:
+        script = _load_script_module()
+
+        config = script.PipelineConfig(python="python", methods="cgc,cgc-star")
+        steps = script.build_steps(config)
+        names = [step.name for step in steps]
+
+        self.assertEqual(
+            names,
+            [
+                "locked dynamic-A validation",
+                "empirical null controls",
+                "empirical re-estimation stability",
+                "result readiness report",
+                "manuscript evidence package",
+                "todo completion audit",
+            ],
+        )
+        self.assertEqual([step.number for step in steps], [1, 2, 3, 4, 5, 6])
+        dynamic = steps[0].command
+        self.assertIn("--methods", dynamic)
+        self.assertIn("cgc,cgc-star", dynamic)
+        self.assertIn("outputs/validation_results/dynamic_episodic_locked", dynamic)
+        self.assertIn("--fall-state-mode", dynamic)
+        self.assertIn("stochastic_independent", dynamic)
+        self.assertIn("--topology-mode", dynamic)
+        self.assertIn("sequence", dynamic)
+        self.assertIn("--source-recruitment-probability", dynamic)
+        self.assertIn("--max-lag", dynamic)
+        self.assertIn("--min-rise-run-samples", dynamic)
+        self.assertIn("--rise-match-min-overlap-fraction", dynamic)
+
+    def test_publication_gate_forwards_optional_rise_candidate_switches(self) -> None:
+        script = _load_script_module()
+
+        config = script.PipelineConfig(
+            python="python",
+            skip_null=True,
+            skip_stability=True,
+            min_rise_run_samples=7,
+            rise_candidate_filter=True,
+            dynamic_tau=2,
+            dynamic_n_pasts=5,
+            rise_match_max_lag=4,
+            rise_match_min_overlap_samples=6,
+            rise_run_context_samples=5,
+            resume_dynamic=True,
+        )
+        steps = script.build_steps(config)
+        dynamic = steps[0].command
+
+        self.assertIn("--rise-candidate-filter", dynamic)
+        self.assertIn("--resume", dynamic)
+        self.assertIn("--tau", dynamic)
+        self.assertIn("--n-pasts", dynamic)
+        self.assertIn("2", dynamic)
+        self.assertIn("--rise-match-max-lag", dynamic)
+        self.assertIn("4", dynamic)
+        self.assertIn("--rise-match-min-overlap-samples", dynamic)
+        self.assertIn("6", dynamic)
+        self.assertIn("--rise-run-context-samples", dynamic)
+        self.assertIn("5", dynamic)
+
+    def test_skip_options_mark_only_heavy_gate_steps(self) -> None:
+        script = _load_script_module()
+
+        config = script.PipelineConfig(
+            python="python",
+            skip_dynamic=True,
+            skip_null=True,
+            skip_stability=True,
+        )
+        steps = script.build_steps(config)
+
+        self.assertEqual(
+            [step.name for step in steps],
+            [
+                "locked dynamic-A validation",
+                "empirical null controls",
+                "empirical re-estimation stability",
+                "result readiness report",
+                "manuscript evidence package",
+                "todo completion audit",
+            ],
+        )
+        self.assertEqual([step.number for step in steps], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(
+            [step.skip_reason for step in steps[:3]],
+            [
+                "requested by --skip-dynamic",
+                "requested by --skip-null",
+                "requested by --skip-stability",
+            ],
+        )
+        self.assertEqual([step.skip_reason for step in steps[3:]], [None, None, None])
+
+    def test_skip_completed_marks_existing_heavy_gate_outputs(self) -> None:
+        script = _load_script_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            (output_dir / "summary.json").write_text(
+                json.dumps({"status": "complete"}),
+                encoding="utf-8",
+            )
+            config = script.PipelineConfig(
+                python="python",
+                dynamic_output_dir=output_dir,
+                skip_completed=True,
+            )
+            steps = script.build_steps(config)
+
+            self.assertEqual(
+                steps[0].skip_reason,
+                f"already complete: {output_dir / 'summary.json'}",
+            )
+
+    def test_skip_completed_requires_complete_status(self) -> None:
+        script = _load_script_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            (output_dir / "summary.json").write_text(
+                json.dumps({"status": "running"}),
+                encoding="utf-8",
+            )
+            config = script.PipelineConfig(
+                python="python",
+                dynamic_output_dir=output_dir,
+                skip_completed=True,
+            )
+            steps = script.build_steps(config)
+
+            self.assertIsNone(steps[0].skip_reason)
+
+    def test_resume_forwards_to_every_long_running_gate(self) -> None:
+        script = _load_script_module()
+
+        config = script.PipelineConfig(
+            python="python",
+            resume=True,
+            resume_dynamic=True,
+        )
+        steps = script.build_steps(config)
+
+        self.assertIn("--resume", steps[0].command)
+        self.assertIn("--resume", steps[1].command)
+        self.assertIn("--resume", steps[2].command)
+
+    def test_custom_heavy_output_dirs_are_forwarded_to_derived_reports(self) -> None:
+        script = _load_script_module()
+
+        config = script.PipelineConfig(
+            python="python",
+            dynamic_output_dir=Path("scratch/dynamic"),
+            null_output_dir=Path("scratch/null"),
+            stability_output_dir=Path("scratch/stability"),
+            skip_completed=True,
+        )
+        steps = script.build_steps(config)
+
+        for step in steps[3:5]:
+            self.assertIn("scratch/dynamic", step.command)
+            self.assertIn("scratch/null", step.command)
+            self.assertIn("scratch/stability", step.command)
+            self.assertIsNone(step.skip_reason)
+        self.assertIn("scratch/dynamic", steps[5].command)
+        self.assertIn("scratch/stability", steps[5].command)
+        self.assertIsNone(steps[5].skip_reason)
+
+    def test_formats_commands_without_shell_execution(self) -> None:
+        script = _load_script_module()
+
+        formatted = script.format_command(
+            ("python", "script.py", "--methods", "cgc,cgc-star")
+        )
+
+        self.assertEqual(formatted, "python script.py --methods cgc,cgc-star")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -9,25 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
-
-try:
-    from numba import jit
-except Exception:  # pragma: no cover - numba is optional at runtime
-    def jit(*_args, **_kwargs):  # type: ignore[misc]
-        def decorator(func):
-            return func
-
-        return decorator
-
 
 SHD = None
 SID = None
 
 
-@jit(nopython=True)
 def _perm_test_numba(x: np.ndarray, y: np.ndarray, n_perm: int) -> float:
     """Compute a circular-shift permutation p-value for correlation.
 
@@ -38,20 +27,30 @@ def _perm_test_numba(x: np.ndarray, y: np.ndarray, n_perm: int) -> float:
     if x.size <= 1 or y.size <= 1 or n_perm <= 0:
         return 1.0
 
-    count = 0
-    corr_obs = np.corrcoef(x, y)[1, 0]
-    x_copy = x.copy()
-    low = 1
-    high = x.size
+    x_centered = np.asarray(x, dtype=float) - np.mean(x)
+    y_centered = np.asarray(y, dtype=float) - np.mean(y)
+    denominator = np.sqrt(
+        np.dot(x_centered, x_centered) * np.dot(y_centered, y_centered)
+    )
+    if not np.isfinite(denominator) or denominator <= 0.0:
+        return 0.0
 
-    for _ in range(n_perm):
-        shift = np.random.randint(low, high)
-        rolled = np.hstack((x_copy[shift:], x_copy[:shift]))
-        corr_perm = np.corrcoef(rolled, y)[1, 0]
-        if np.abs(corr_perm) >= np.abs(corr_obs):
-            count += 1
-
-    return count / n_perm
+    # A circular shift preserves the centered norm.  Compute the correlation
+    # at every distinct shift once with a circular cross-correlation, then draw
+    # the same with-replacement Monte Carlo shifts as the original loop.  This
+    # is numerically equivalent but avoids rebuilding a rolled vector and a
+    # 2x2 covariance matrix for every surrogate.
+    circular_products = np.fft.ifft(
+        np.fft.fft(x_centered) * np.conj(np.fft.fft(y_centered))
+    ).real
+    correlations = circular_products / denominator
+    shifts = np.random.randint(1, x.size, size=n_perm)
+    return float(
+        np.count_nonzero(
+            np.abs(correlations[shifts]) >= np.abs(correlations[0])
+        )
+        / n_perm
+    )
 
 
 def regression_residual(x: np.ndarray, z: np.ndarray) -> np.ndarray:
@@ -65,16 +64,52 @@ def regression_residual(x: np.ndarray, z: np.ndarray) -> np.ndarray:
         Conditioning set shaped ``(n_covariates, T)``.
     """
 
-    if z.size == 0:
-        return x - np.mean(x)
+    target = np.asarray(x, dtype=float)
+    conditioning = np.asarray(z, dtype=float)
+    if target.ndim != 1:
+        raise ValueError("x must be one-dimensional")
+    if not np.isfinite(target).all() or not np.isfinite(conditioning).all():
+        raise ValueError("regression inputs must contain only finite values")
+    if conditioning.size == 0:
+        return target - np.mean(target)
 
-    if z.ndim == 1:
-        z = z[np.newaxis, :]
+    if conditioning.ndim == 1:
+        conditioning = conditioning[np.newaxis, :]
+    if conditioning.ndim != 2 or conditioning.shape[1] != target.size:
+        raise ValueError("z must have shape (n_covariates, x.size)")
 
-    design = np.vstack([z, np.ones(z.shape[1])]).T
-    coef, *_ = np.linalg.lstsq(design, x, rcond=None)
-    fitted = design @ coef
-    return x - fitted
+    design = np.column_stack([np.ones(target.size), conditioning.T])
+    try:
+        coef, *_ = np.linalg.lstsq(design, target, rcond=None)
+        return target - design @ coef
+    except np.linalg.LinAlgError:
+        # Some LAPACK SVD implementations occasionally fail on the highly
+        # collinear lag matrices produced by shared-input simulations. Centering
+        # and scaling preserve the conditioning column space. An eigensolved
+        # Gram pseudoinverse then provides the same least-squares projection
+        # without calling the failed SVD path.
+        centered_target = target - np.mean(target)
+        centered = conditioning - np.mean(conditioning, axis=1, keepdims=True)
+        scales = np.linalg.norm(centered, axis=1)
+        scale_tolerance = np.finfo(float).eps * max(1.0, float(np.max(scales)))
+        retained = scales > scale_tolerance
+        if not np.any(retained):
+            return centered_target
+        predictors = (centered[retained] / scales[retained, None]).T
+        gram = predictors.T @ predictors
+        eigenvalues, eigenvectors = np.linalg.eigh(gram)
+        eigen_tolerance = (
+            np.finfo(float).eps
+            * max(predictors.shape)
+            * max(1.0, float(np.max(np.abs(eigenvalues))))
+        )
+        inverse = np.zeros_like(eigenvalues)
+        estimable = eigenvalues > eigen_tolerance
+        inverse[estimable] = 1.0 / eigenvalues[estimable]
+        coef = eigenvectors @ (
+            inverse * (eigenvectors.T @ (predictors.T @ centered_target))
+        )
+        return centered_target - predictors @ coef
 
 
 @dataclass
@@ -164,37 +199,74 @@ class GcStar:
         excluded = np.r_[np.array(excluded_history, dtype=int), [i, j]]
         return np.delete(self.shifted_data, excluded, axis=0)
 
-    def correlation_func(self, data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def correlation_func(
+        self,
+        data: np.ndarray,
+        eligible_pairs: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
         """Compute unconditional dependence and permutation p-values."""
 
         self.n_neur = data.shape[0]
         shifted = self.shift_data(data.copy())
         n_rows = shifted.shape[0]
-        corr = np.abs(np.corrcoef(shifted))
-        pvals = np.zeros((n_rows, self.n_neur))
+        eligible = self._normalise_eligible_pairs(eligible_pairs, self.n_neur)
+        diagnostics = self._init_pair_diagnostics(self.n_pasts)
+        corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        pvals = np.ones((n_rows, self.n_neur), dtype=float)
+
+        if eligible is None and shifted.shape[1] >= 2:
+            corr = np.abs(np.corrcoef(shifted))[:, : self.n_neur]
 
         for i in range(n_rows):
+            source = i % self.n_neur
+            lag = i // self.n_neur
             for j in range(self.n_neur):
-                pvals[i, j] = _perm_test_numba(shifted[i, :], shifted[j, :], self.n_perm)
+                if not self._pair_is_eligible(eligible, source, j):
+                    self._record_pair_diagnostic(diagnostics, lag, "mask_skipped")
+                    continue
+                x = shifted[i, :]
+                y = shifted[j, :]
+                if x.size < 2 or y.size < 2:
+                    self._record_pair_diagnostic(
+                        diagnostics, lag, "insufficient_sample"
+                    )
+                    continue
+                if eligible is not None:
+                    corr[i, j] = self._safe_abs_corr(x, y)
+                pvals[i, j] = self._safe_perm_test(x, y)
+                self._record_pair_diagnostic(diagnostics, lag, "completed")
 
-        return corr[:, : self.n_neur], pvals
+        return corr, pvals, diagnostics
 
     def inv_correlation_func(
         self,
         data: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
+        eligible_pairs: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
         """Compute conditional dependence using residual correlations."""
 
         self.n_neur = data.shape[0]
         shifted = self.shift_data(data.copy())
         n_rows = shifted.shape[0]
+        eligible = self._normalise_eligible_pairs(eligible_pairs, self.n_neur)
+        diagnostics = self._init_pair_diagnostics(self.n_pasts)
         inv_corr = np.zeros((n_rows, self.n_neur))
-        pvals = np.zeros((n_rows, self.n_neur))
+        pvals = np.ones((n_rows, self.n_neur))
 
         for i in range(n_rows):
+            source = i % self.n_neur
+            lag = i // self.n_neur
             for j in range(self.n_neur):
+                if not self._pair_is_eligible(eligible, source, j):
+                    self._record_pair_diagnostic(diagnostics, lag, "mask_skipped")
+                    continue
                 x = shifted[i]
                 y = shifted[j]
+                if x.size < 2 or y.size < 2:
+                    self._record_pair_diagnostic(
+                        diagnostics, lag, "insufficient_sample"
+                    )
+                    continue
                 if self.method == "fcgc":
                     z = np.delete(shifted.copy(), [i, j], axis=0)
                 else:
@@ -203,11 +275,416 @@ class GcStar:
                 x_res = regression_residual(x, z)
                 y_res = regression_residual(y, z)
                 inv_corr[i, j] = np.abs(np.corrcoef(x_res, y_res)[1, 0])
-                pvals[i, j] = _perm_test_numba(x_res, y_res, self.n_perm)
+                pvals[i, j] = self._safe_perm_test(x_res, y_res)
+                self._record_pair_diagnostic(diagnostics, lag, "completed")
 
-        return inv_corr, pvals
+        return inv_corr, pvals, diagnostics
 
-    def fit(self, data: np.ndarray, verbose: int = 0) -> "GcStar":
+    @staticmethod
+    def _safe_abs_corr(x: np.ndarray, y: np.ndarray) -> float:
+        if x.size < 2 or y.size < 2 or np.std(x) == 0.0 or np.std(y) == 0.0:
+            return 0.0
+        value = np.corrcoef(x, y)[1, 0]
+        return 0.0 if not np.isfinite(value) else float(abs(value))
+
+    def _safe_perm_test(self, x: np.ndarray, y: np.ndarray) -> float:
+        if (
+            self.n_perm <= 0
+            or x.size < 2
+            or y.size < 2
+            or np.std(x) == 0.0
+            or np.std(y) == 0.0
+        ):
+            return 1.0
+        return float(_perm_test_numba(x, y, self.n_perm))
+
+    @staticmethod
+    def _normalise_eligible_pairs(
+        eligible_pairs: np.ndarray | None,
+        n_nodes: int,
+    ) -> np.ndarray | None:
+        if eligible_pairs is None:
+            return None
+        values = np.asarray(eligible_pairs, dtype=bool)
+        if values.shape != (n_nodes, n_nodes):
+            raise ValueError("eligible_pairs must be square with one row per ROI.")
+        return values
+
+    @staticmethod
+    def _init_pair_diagnostics(n_pasts: int) -> dict[str, Any]:
+        per_lag = []
+        for lag in range(n_pasts + 1):
+            per_lag.append(
+                {
+                    "lag": lag,
+                    "attempted": 0,
+                    "completed": 0,
+                    "mask_skipped": 0,
+                    "insufficient_sample": 0,
+                }
+            )
+        return {
+            "attempted": 0,
+            "completed": 0,
+            "mask_skipped": 0,
+            "insufficient_sample": 0,
+            "per_lag": per_lag,
+        }
+
+    @staticmethod
+    def _record_pair_diagnostic(
+        diagnostics: dict[str, Any],
+        lag: int,
+        outcome: str,
+    ) -> None:
+        diagnostics["attempted"] += 1
+        diagnostics["per_lag"][lag]["attempted"] += 1
+        diagnostics[outcome] += 1
+        diagnostics["per_lag"][lag][outcome] += 1
+
+    @staticmethod
+    def _pair_is_eligible(
+        eligible_pairs: np.ndarray | None,
+        source: int,
+        target: int,
+    ) -> bool:
+        if eligible_pairs is None:
+            return True
+        return bool(eligible_pairs[source, target])
+
+    @staticmethod
+    def _normalise_event_indices(
+        event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None,
+        n_nodes: int,
+        n_steps: int,
+    ) -> tuple[np.ndarray, ...]:
+        if event_indices is None:
+            all_frames = np.arange(n_steps, dtype=int)
+            return tuple(all_frames.copy() for _ in range(n_nodes))
+        if len(event_indices) != n_nodes:
+            raise ValueError("event_indices must contain one frame list per ROI.")
+        normalised = []
+        for frames in event_indices:
+            values = np.asarray(frames, dtype=int)
+            if np.any(values < 0) or np.any(values >= n_steps):
+                raise ValueError("event_indices include an out-of-range frame.")
+            normalised.append(np.unique(values))
+        return tuple(normalised)
+
+    @staticmethod
+    def _normalise_segment_ids(
+        segment_ids: np.ndarray | None,
+        n_steps: int,
+    ) -> np.ndarray | None:
+        if segment_ids is None:
+            return None
+        values = np.asarray(segment_ids, dtype=int)
+        if values.shape != (n_steps,):
+            raise ValueError("segment_ids must contain one value per timepoint.")
+        return values
+
+    def _physical_sample_times(
+        self,
+        event_indices: tuple[np.ndarray, ...],
+        source: int,
+        target: int,
+        lag: int,
+        n_steps: int,
+        segment_ids: np.ndarray | None,
+    ) -> np.ndarray:
+        target_mask = np.zeros(n_steps, dtype=bool)
+        source_mask = np.zeros(n_steps, dtype=bool)
+        target_mask[event_indices[target]] = True
+        source_mask[event_indices[source]] = True
+        times = np.arange(max(self.n_pasts, lag), n_steps, dtype=int)
+        valid = target_mask[times] & source_mask[times - lag]
+        if segment_ids is not None:
+            valid &= segment_ids[times] >= 0
+            valid &= segment_ids[times - lag] >= 0
+            valid &= segment_ids[times] == segment_ids[times - lag]
+        return times[valid]
+
+    def _shifted_rows_at_times(self, data: np.ndarray, times: np.ndarray) -> np.ndarray:
+        rows = [data[:, times]]
+        for lag in range(1, self.n_pasts + 1):
+            rows.append(data[:, times - lag])
+        return np.vstack(rows)
+
+    def _physical_conditioning_set(
+        self,
+        shifted: np.ndarray,
+        row_index: int,
+        target: int,
+    ) -> np.ndarray:
+        if self.method == "fcgc":
+            excluded = np.array([row_index, target], dtype=int)
+            return np.delete(shifted, np.unique(excluded), axis=0)
+
+        return self._rising_flank_conditioning_set(shifted, row_index, target)
+
+    def _rising_flank_conditioning_set(
+        self,
+        shifted: np.ndarray,
+        row_index: int,
+        target: int,
+    ) -> np.ndarray:
+        """Condition using the original rising-flank c-GC variable logic."""
+
+        source = row_index % self.n_neur
+        source_lag = row_index // self.n_neur
+        rows: list[int] = []
+        for lag in range(source_lag + 1, self.n_pasts + 1):
+            rows.append(lag * self.n_neur + source)
+        for lag in range(1, self.n_pasts + 1):
+            rows.append(lag * self.n_neur + target)
+        for other in range(self.n_neur):
+            if other in {source, target}:
+                continue
+            for lag in range(source_lag, self.n_pasts + 1):
+                rows.append(lag * self.n_neur + other)
+        if not rows:
+            return np.empty((0, shifted.shape[1]))
+        return shifted[np.asarray(rows, dtype=int)]
+
+    def fit_event_compressed(
+        self,
+        data: np.ndarray,
+        event_indices: tuple[np.ndarray, ...] | list[np.ndarray],
+        verbose: int = 0,
+        eligible_pairs: np.ndarray | None = None,
+    ) -> "GcStar":
+        """Fit modified c-GC/c-GC* using old selected-frame compression logic."""
+
+        self.data = data.copy()
+        self.n_neur = data.shape[0]
+        self._configure_logging(verbose)
+        selected = self._normalise_event_indices(
+            event_indices, self.n_neur, data.shape[1]
+        )
+        eligible = self._normalise_eligible_pairs(eligible_pairs, self.n_neur)
+        n_rows = (self.n_pasts + 1) * self.n_neur
+        diagnostics = self._init_pair_diagnostics(self.n_pasts)
+        corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_corr = np.ones((n_rows, self.n_neur), dtype=float)
+        inv_corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_inv = np.ones((n_rows, self.n_neur), dtype=float)
+
+        for row_index in range(n_rows):
+            source = row_index % self.n_neur
+            lag = row_index // self.n_neur
+            for target in range(self.n_neur):
+                if not self._pair_is_eligible(eligible, source, target):
+                    self._record_pair_diagnostic(diagnostics, lag, "mask_skipped")
+                    continue
+                common = np.intersect1d(selected[source], selected[target])
+                if common.size <= self.n_pasts + 1:
+                    self._record_pair_diagnostic(
+                        diagnostics, lag, "insufficient_sample"
+                    )
+                    continue
+                shifted = self.shift_data(data[:, common])
+                if shifted.shape[1] < 2:
+                    self._record_pair_diagnostic(
+                        diagnostics, lag, "insufficient_sample"
+                    )
+                    continue
+                x = shifted[row_index]
+                y = shifted[target]
+                corr[row_index, target] = self._safe_abs_corr(x, y)
+                p_corr[row_index, target] = self._safe_perm_test(x, y)
+                z = self._physical_conditioning_set(shifted, row_index, target)
+                x_res = regression_residual(x, z)
+                y_res = regression_residual(y, z)
+                inv_corr[row_index, target] = self._safe_abs_corr(x_res, y_res)
+                p_inv[row_index, target] = self._safe_perm_test(x_res, y_res)
+                self._record_pair_diagnostic(diagnostics, lag, "completed")
+
+        self.corr_, self.pVal_corr_ = corr, p_corr
+        self.inv_corr_, self.pVal_inv_corr_ = inv_corr, p_inv
+        self.pair_diagnostics_ = diagnostics
+        return self
+
+    def physical_event_correlation_func(
+        self,
+        data: np.ndarray,
+        event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None = None,
+        segment_ids: np.ndarray | None = None,
+        eligible_pairs: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+        """Compute modified c-GC/c-GC* on valid physical event-lag samples.
+
+        Unlike event-compressed analyses, this only evaluates source-target
+        samples where target time ``t`` and source time ``t-lag`` are selected
+        on the original time axis. When ``segment_ids`` is provided, both times
+        must also belong to the same non-negative segment, preventing lag pairs
+        from crossing transient or episode boundaries.
+        """
+
+        self.n_neur = data.shape[0]
+        selected = self._normalise_event_indices(
+            event_indices, self.n_neur, data.shape[1]
+        )
+        segments = self._normalise_segment_ids(segment_ids, data.shape[1])
+        eligible = self._normalise_eligible_pairs(eligible_pairs, self.n_neur)
+        n_rows = (self.n_pasts + 1) * self.n_neur
+        diagnostics = self._init_pair_diagnostics(self.n_pasts)
+        corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_corr = np.ones((n_rows, self.n_neur), dtype=float)
+        inv_corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_inv = np.ones((n_rows, self.n_neur), dtype=float)
+
+        for lag in range(self.n_pasts + 1):
+            for source in range(self.n_neur):
+                row_index = lag * self.n_neur + source
+                for target in range(self.n_neur):
+                    if not self._pair_is_eligible(eligible, source, target):
+                        self._record_pair_diagnostic(
+                            diagnostics, lag, "mask_skipped"
+                        )
+                        continue
+                    times = self._physical_sample_times(
+                        selected, source, target, lag, data.shape[1], segments
+                    )
+                    if times.size < 2:
+                        self._record_pair_diagnostic(
+                            diagnostics, lag, "insufficient_sample"
+                        )
+                        continue
+                    shifted = self._shifted_rows_at_times(data, times)
+                    x = shifted[row_index]
+                    y = shifted[target]
+                    corr[row_index, target] = self._safe_abs_corr(x, y)
+                    p_corr[row_index, target] = self._safe_perm_test(x, y)
+                    z = self._physical_conditioning_set(shifted, row_index, target)
+                    x_res = regression_residual(x, z)
+                    y_res = regression_residual(y, z)
+                    inv_corr[row_index, target] = self._safe_abs_corr(x_res, y_res)
+                    p_inv[row_index, target] = self._safe_perm_test(x_res, y_res)
+                    self._record_pair_diagnostic(diagnostics, lag, "completed")
+        return corr, p_corr, inv_corr, p_inv, diagnostics
+
+    def fit_event_physical(
+        self,
+        data: np.ndarray,
+        event_indices: tuple[np.ndarray, ...] | list[np.ndarray] | None = None,
+        segment_ids: np.ndarray | None = None,
+        verbose: int = 0,
+        eligible_pairs: np.ndarray | None = None,
+    ) -> "GcStar":
+        """Fit modified c-GC/c-GC* while preserving physical event lags."""
+
+        self.data = data.copy()
+        self.shifted_data = self.shift_data(self.data)
+        self._configure_logging(verbose)
+        (
+            self.corr_,
+            self.pVal_corr_,
+            self.inv_corr_,
+            self.pVal_inv_corr_,
+            self.pair_diagnostics_,
+        ) = self.physical_event_correlation_func(
+            self.data,
+            event_indices=event_indices,
+            segment_ids=segment_ids,
+            eligible_pairs=eligible_pairs,
+        )
+        return self
+
+    def _cross_conditioning_set(
+        self,
+        predictors_shifted: np.ndarray,
+        outcomes_shifted: np.ndarray,
+        row_index: int,
+        target: int,
+    ) -> np.ndarray:
+        """Build a conditioning set for source and outcome representations."""
+
+        source = row_index % self.n_neur
+        source_lag = row_index // self.n_neur
+        if self.method == "fcgc":
+            predictor_rows = np.delete(predictors_shifted, row_index, axis=0)
+            outcome_rows = np.delete(outcomes_shifted, target, axis=0)
+            return np.vstack([predictor_rows, outcome_rows])
+
+        rows: list[np.ndarray] = []
+        for lag in range(source_lag + 1, self.n_pasts + 1):
+            rows.append(predictors_shifted[lag * self.n_neur + source])
+        for lag in range(1, self.n_pasts + 1):
+            rows.append(outcomes_shifted[lag * self.n_neur + target])
+        for other in range(self.n_neur):
+            if other in {source, target}:
+                continue
+            for lag in range(source_lag, self.n_pasts + 1):
+                rows.append(predictors_shifted[lag * self.n_neur + other])
+        if not rows:
+            return np.empty((0, predictors_shifted.shape[1]))
+        return np.asarray(rows, dtype=float)
+
+    def fit_cross(
+        self,
+        predictors: np.ndarray,
+        outcomes: np.ndarray,
+        verbose: int = 0,
+        eligible_pairs: np.ndarray | None = None,
+    ) -> "GcStar":
+        """Fit source representation at lag to a distinct target representation."""
+
+        if predictors.shape != outcomes.shape:
+            raise ValueError("predictors and outcomes must have matching shapes")
+        self.data = predictors.copy()
+        self.outcomes = outcomes.copy()
+        self.n_neur = predictors.shape[0]
+        self._configure_logging(verbose)
+        eligible = self._normalise_eligible_pairs(eligible_pairs, self.n_neur)
+        predictors_shifted = self.shift_data(predictors.copy())
+        outcomes_shifted = self.shift_data(outcomes.copy())
+        n_rows = predictors_shifted.shape[0]
+        diagnostics = self._init_pair_diagnostics(self.n_pasts)
+        corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_corr = np.ones((n_rows, self.n_neur), dtype=float)
+        inv_corr = np.zeros((n_rows, self.n_neur), dtype=float)
+        p_inv = np.ones((n_rows, self.n_neur), dtype=float)
+
+        for row_index in range(n_rows):
+            source = row_index % self.n_neur
+            lag = row_index // self.n_neur
+            for target in range(self.n_neur):
+                if not self._pair_is_eligible(eligible, source, target):
+                    self._record_pair_diagnostic(diagnostics, lag, "mask_skipped")
+                    continue
+                x = predictors_shifted[row_index]
+                y = outcomes_shifted[target]
+                if x.size < 2 or y.size < 2:
+                    self._record_pair_diagnostic(
+                        diagnostics, lag, "insufficient_sample"
+                    )
+                    continue
+                corr[row_index, target] = self._safe_abs_corr(x, y)
+                p_corr[row_index, target] = self._safe_perm_test(x, y)
+                z = self._cross_conditioning_set(
+                    predictors_shifted,
+                    outcomes_shifted,
+                    row_index,
+                    target,
+                )
+                x_res = regression_residual(x, z)
+                y_res = regression_residual(y, z)
+                inv_corr[row_index, target] = self._safe_abs_corr(x_res, y_res)
+                p_inv[row_index, target] = self._safe_perm_test(x_res, y_res)
+                self._record_pair_diagnostic(diagnostics, lag, "completed")
+
+        self.shifted_data = predictors_shifted
+        self.corr_, self.pVal_corr_ = corr, p_corr
+        self.inv_corr_, self.pVal_inv_corr_ = inv_corr, p_inv
+        self.pair_diagnostics_ = diagnostics
+        return self
+
+    def fit(
+        self,
+        data: np.ndarray,
+        verbose: int = 0,
+        eligible_pairs: np.ndarray | None = None,
+    ) -> "GcStar":
         """Fit the estimator on an array of shape ``(n_variables, T)``."""
 
         self.data = data.copy()
@@ -218,13 +695,22 @@ class GcStar:
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                corr_future = executor.submit(self.correlation_func, data)
-                inv_future = executor.submit(self.inv_correlation_func, data)
-                self.corr_, self.pVal_corr_ = corr_future.result()
-                self.inv_corr_, self.pVal_inv_corr_ = inv_future.result()
+                corr_future = executor.submit(self.correlation_func, data, eligible_pairs)
+                inv_future = executor.submit(
+                    self.inv_correlation_func, data, eligible_pairs
+                )
+                self.corr_, self.pVal_corr_, self.pair_diagnostics_ = (
+                    corr_future.result()
+                )
+                self.inv_corr_, self.pVal_inv_corr_, _ = inv_future.result()
         else:
-            self.corr_, self.pVal_corr_ = self.correlation_func(data)
-            self.inv_corr_, self.pVal_inv_corr_ = self.inv_correlation_func(data)
+            self.corr_, self.pVal_corr_, self.pair_diagnostics_ = (
+                self.correlation_func(data, eligible_pairs)
+            )
+            self.inv_corr_, self.pVal_inv_corr_, _ = self.inv_correlation_func(
+                data,
+                eligible_pairs,
+            )
 
         return self
 
@@ -237,7 +723,12 @@ class GcStar:
     ) -> np.ndarray:
         """Construct a weighted connectivity matrix from significance masks."""
 
-        if self.corr_ is None or self.inv_corr_ is None:
+        if (
+            self.corr_ is None
+            or self.inv_corr_ is None
+            or self.pVal_corr_ is None
+            or self.pVal_inv_corr_ is None
+        ):
             raise RuntimeError("fit must be called before get_connectivity_matrix.")
 
         sig_corr = np.multiply(self.corr_, self.pVal_corr_ <= alpha)
@@ -316,7 +807,7 @@ class GcStar:
         global SHD, SID
         if SHD is None:
             try:
-                from cdt.metrics import SHD as _SHD, SID as _SID
+                from cdt.metrics import SHD as _SHD, SID as _SID  # type: ignore[import-not-found]
             except Exception as exc:  # pragma: no cover - optional dependency
                 raise ImportError("cdt.metrics is required for SHD/SID computations.") from exc
             SHD, SID = _SHD, _SID

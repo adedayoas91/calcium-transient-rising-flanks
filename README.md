@@ -4,11 +4,18 @@
 
 This work is solely for calcium imaging data analysis.
 
-Calcium flows into the soma of neurons, activating green fluorescence protein (GFP), which then fluoresces. A key characteristic of GFP is its **very fast rise but slow fall** in fluorescence. It is essential to understand that the pumping out of calcium from the soma does not have any contribution to the causal relation between any two neurons.
+Activity-evoked calcium influx is reported indirectly by a fluorescent calcium
+indicator. These signals commonly rise faster than they decay, but the falling
+phase can reflect a mixture of indicator kinetics, calcium handling,
+physiology, and noise. It therefore cannot be assumed a priori to contain no
+causal information.
 
 ![Calcium inflow visualization showing GFP response with fast rise and slow fall characteristics](https://user-images.githubusercontent.com/47278559/209997772-998b1c87-c6ff-463b-9162-d960484d3e82.png)
 
-This project explores only the activations of neurons and finds meaningful structures in the data by analyzing the rising flanks of calcium transients—the rapid activation phase where causal relationships are most informative.
+This project tests the proposal that rising-flank increments better preserve
+directed activation timing than full or falling traces. Falling-flank and
+decay-residual analyses are retained as falsification comparators; they do not
+guarantee that a recovered rise graph is causal.
 
 ## Overview
 
@@ -25,28 +32,33 @@ This repository now provides a runnable, tested reference implementation for:
   artefact correction, and smoothing;
 - full, AR(1)-deconvolved, rising-flank, falling-flank, and decay-null
   residual representations;
-- a typed adapter over the supplied `src/core/rising_flanks.py` c-GC
-  implementation;
+- a typed adapter over the supplied `src/core/causalised-GC.py` c-GC/c-GC*
+  implementation, including compressed and physical event modes;
 - `W_IC`, binary `W_IC`, paired `Delta W_IC`, and `W_RC`;
-- cyclic-shift and reverse-time null controls;
+- cyclic-shift, reverse-time, event-jitter, phase-permutation, and
+  cross-recording null controls;
 - synthetic calcium-observation validation and directed-edge recovery metrics;
+- dynamic-A episodic simulations where rise phases use episode-specific
+  adjacency matrices and fall phases default to stochastic graph-independent
+  noncausal controls, with passive decay available as an ablation;
 - prespecified transient and residual diagnostics;
 - synthetic observation/sampling grids, locked calibration/evaluation splitting,
   and empirical parameter sensitivity execution;
-- a latent-confounding sensitivity adapter boundary for future LPCMCI or
-  SVAR-FCI integrations; and
+- an optional LPCMCI adapter that preserves raw PAG outputs, plus a controlled
+  common-input benchmark; SVAR-FCI remains future work; and
 - bilateral structure plots, anatomical topographic overlays for notebook
   results, and compatibility wrappers for the starter module names.
 
-The supplied notebook suite is not currently reproducible as-is: although
-`data/` contains the supplied Fish 3 trace, centroid, and background arrays,
-the notebooks import external modules that are not in this repository.
-`src/core/rising_flanks.py` is nevertheless present and is treated as the
-canonical estimator source. `CausalGranger` is an adapter that passes raw
-traces plus selected-frame indices to `RisingFlanks.fit_rising` and shapes its
-output for the metric pipeline; it does not implement a second GC algorithm.
-`src/core/causalised-GC.py` is retained as supplied supporting source and is
-not needed by the current adapter path.
+The legacy notebook suite is not uniformly standalone: although `data/`
+contains the supplied Fish 3 trace, centroid, and background arrays, some
+notebooks import external modules that are not in this repository. The tested
+scripts under `examples/` are the reproducible reference workflows; they do
+not make the legacy notebooks self-contained.
+`src/core/causalised-GC.py` is the active estimator source for c-GC and c-GC*.
+`CausalisedGC` shapes that supplied implementation for the metric pipeline and
+adds modified event-aware fitting paths: compressed mode follows the old
+rising-flank selected-frame logic, and physical mode preserves original-frame
+lags while blocking cross-segment discontinuities.
 
 ## Package Layout
 
@@ -55,12 +67,12 @@ not needed by the current adapter path.
 | `preprocessing.py` | Trace validation, normalization, declared exclusions, artefact interpolation, smoothing, A-D scenarios |
 | `representations.py` | Full/deconvolved/rise/fall representations and decay-null residual |
 | `diagnostics.py` | Pre-network decay, rise-density/duration, robust SNR, and residual checks |
-| `estimators.py` | `CausalGranger` adapter over supplied `RisingFlanks`, graph-result shaping, FDR control |
+| `estimators.py` | `CausalisedGC` adapter over supplied c-GC/c-GC*, graph-result shaping, selected-frame and segment-aware fitting |
 | `metrics.py` | `W_IC`, `W_RC`, `Delta W_IC`, recovery and stability summaries |
-| `validation.py` | Synthetic data, cyclic-shift/reverse-time controls, representation validation |
+| `validation.py` | Synthetic data, null controls, representation validation, and stability resampling |
 | `robustness.py` | Sampling/observation grids, locked splits, and empirical parameter sensitivity |
 | `pipeline.py` | Full paired analysis across preprocessing scenarios |
-| `sensitivity.py` | Adapter protocol for PAG-producing latent-confounding analyses |
+| `sensitivity.py` / `baselines.py` | PAG protocol plus optional LPCMCI and OASIS adapters; raw PAG semantics are preserved |
 | `plotting.py` | Non-mutating bilateral and anatomical-topographic plots |
 
 ## Scientific Conventions
@@ -68,12 +80,16 @@ not needed by the current adapter path.
 - Trace arrays have shape `(n_rois, n_timepoints)`.
 - Directed matrices are oriented `[source, target]`.
 - Rising and falling representations retain the original time axis and define
-  selected-frame indices passed with the raw traces to the supplied core
-  method.
+  selected-frame indices passed with the raw traces to the supplied c-GC/c-GC*
+  core.
+- `event_mode="compressed"` uses the legacy event-selected pseudo-time
+  sequence. `event_mode="physical"` preserves physical-frame lags and accepts
+  segment IDs so selected samples at `t` and `t-lag` must come from the same
+  contiguous episode segment.
 - This package does not implement bivariate or multivariate Granger
-  causality. It also does not add segment-aware or cross-representation GC
-  behavior that is absent from the supplied core API; attempts to configure
-  those extensions fail explicitly.
+  causality. It also does not add cross-representation GC behavior that is
+  absent from the supplied core API; attempts to configure that extension fail
+  explicitly.
 - `W_IC` is an ipsilateral-consistency statistic, not a synaptic-recovery
   metric. If only retained arrows are meaningful, set `metric_binary=True` and
   report binary `W_IC` rather than treating significance as an edge strength.
@@ -81,6 +97,17 @@ not needed by the current adapter path.
   rise/fall summaries, null controls, and an accompanying `W_RC` analysis.
 
 ## Quick Start
+
+Create the complete locked environment, including notebook tooling and both
+optional scientific baselines:
+
+```bash
+uv sync --frozen --all-extras
+```
+
+The repository pins Python 3.13 in `.python-version`. Run commands through
+`uv run --no-sync` after setup so concurrent notebooks cannot mutate the shared
+environment.
 
 Run the unit tests without installing another test runner:
 
@@ -95,6 +122,260 @@ Run a synthetic end-to-end analysis:
 PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
   .venv/bin/python examples/synthetic_pipeline.py
 ```
+
+Run the smallest deterministic example with known directed truth and save its
+fully declared configuration and recovery metrics:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/minimal_reproducible_analysis.py \
+  --output outputs/minimal_reproducible_analysis.json
+```
+
+Build the bounded sensitivity package. This reuses the saved locked
+dynamic rows to compute seed-level bootstrap confidence intervals and generator
+summaries, then runs a small locked static-synthetic threshold/smoothing grid:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/build_sensitivity_package.py
+```
+
+The package writes `outputs/method_sensitivity/dynamic_seed_summary.csv`,
+`dynamic_paired_contrasts.csv`, `dynamic_generator_seed_rows.csv`,
+`dynamic_generator_summary.csv`, `threshold_smoothing_seed_rows.csv`,
+`threshold_smoothing_summary.csv`, `threshold_smoothing_sensitivity.png`, and
+`summary.json`. The intervals quantify between-seed Monte Carlo variation only.
+The threshold grid and plotted curves are bounded four-node proposal stress
+tests with 199 surrogates, not a comprehensive simulation or empirical
+benchmark. Use `--skip-threshold-grid` to rebuild only the summaries from saved
+locked rows.
+
+Generate dynamic-A episodic validation tables where rise phases are driven by
+episode-specific adjacency matrices and fall phases have no cross-ROI
+propagation. By default the script uses stochastic graph-independent fall
+initialization; pass `--fall-state-mode passive_decay` to keep falls as passive
+carryover from the preceding rise:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/dynamic_episodic_validation.py
+```
+
+For a locked run, increase the seed count, trace length, and surrogate count:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/dynamic_episodic_validation.py \
+  --output-dir outputs/validation_results/dynamic_episodic_locked \
+  --n-seeds 20 --n-steps 1500 --n-surrogates 1000 \
+  --fall-state-mode stochastic_independent \
+  --methods cgc,cgc-star
+```
+
+The script writes `dynamic_grid_runs.csv`, `representation_summary.csv`,
+`rise_fall_contrasts.csv`, and `summary.json`. For dynamic-A rows, rise/full
+representations are scored against the union of active episode adjacencies,
+while fall and fall-residual representations are scored against zero truth.
+The raw rows, summaries, and contrasts include the selected method label so
+c-GC and c-GC* locked runs can be kept separate. Use `--method cgc` for a
+single-method run or `--methods cgc,cgc-star` for one combined output set.
+If a dynamic validation run is interrupted, rerun the same command with
+`--resume`. The script reuses complete method/event-mode/condition/seed units
+from `dynamic_grid_runs.csv`, reruns missing or incomplete units, and refreshes
+the summaries. If you intentionally change analysis-defining settings, add
+`--restart-incompatible-resume`: the old output directory is retained beside
+the canonical path as `.incompatible-<digest>`, and the new configuration
+starts from zero without mixing rows. The Dynamic-A notebook enables this safe
+restart behavior by default.
+
+The publication-gate wrapper exposes the same resume behavior with
+`--resume-dynamic`.
+
+Run all remaining publication-gate jobs and then refresh the readiness,
+manuscript evidence, and TODO completion packages:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/run_publication_gate_pipeline.py
+```
+
+This command is a dry run by default and prints the exact heavy commands. Add
+`--execute` to run them. Use `--skip-dynamic`, `--skip-null`, or
+`--skip-stability` to rerun only the remaining gates plus the final reports.
+
+Summarize recall-versus-false-positive tradeoffs from saved validation CSVs:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/analyze_false_positive_tradeoffs.py
+```
+
+This writes `outputs/validation_tradeoffs/representation_tradeoff_summary.csv`,
+`outputs/validation_tradeoffs/rise_tradeoff_contrasts.csv`, and
+`outputs/validation_tradeoffs/summary.json`.
+
+Build Chen-style comparison tables from saved weighted adjacency artifacts:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/build_chen_comparison_table.py
+```
+
+This writes `outputs/chen_comparison/chen_comparison_rows.csv`,
+`outputs/chen_comparison/chen_comparison_summary.csv`, and
+`outputs/chen_comparison/summary.json`.
+
+If direct Chen-style BVGC/MVGC weighted matrices are supplied, list them in
+`outputs/chen_direct_matrices/manifest.csv` and rerun the same command. The
+manifest columns are:
+
+```text
+path,method,case,recording,fish,trial,fluo_type,representation,mid,binary,source_note
+```
+
+`path` is resolved relative to the manifest, `method` must identify BVGC or
+MVGC, `mid` gives the left/right split used for `W_IC` and `W_RC`, and
+`binary` controls whether nonzero entries are summarized as binary retained
+edges. These optional rows are labeled as direct Chen BVGC/MVGC matrix
+reproduction in downstream evidence outputs.
+
+Compute paired rise-minus-fall empirical tests from the Chen-style table:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/analyze_empirical_pairing.py
+```
+
+This writes `outputs/empirical_stats/rise_fall_recording_deltas.csv`,
+`outputs/empirical_stats/paired_signflip_tests.csv`, and
+`outputs/empirical_stats/summary.json`.
+
+Generate empirical null-control tables for the saved motoneuron A-D cases:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/run_empirical_null_controls.py \
+  --methods cgc,cgc-star
+```
+
+This writes `outputs/empirical_null_controls/null_control_rows.csv`,
+`outputs/empirical_null_controls/null_control_summary.csv`,
+`outputs/empirical_null_controls/null_control_contrasts.csv`, and
+`outputs/empirical_null_controls/summary.json`. The contrast table reports
+observed-minus-null means and empirical upper-tail null p-values for
+`W_IC`, `W_RC`, edge density, retained edges, and total retained weight.
+Use `--method cgc` for a single-method run.
+
+The saved outputs do not contain per-edge p-value matrices, so a BH-FDR versus
+unadjusted empirical comparison currently requires re-estimation. The following
+commands declare the multiple-testing comparison without running it implicitly. With
+cases C/D, three recordings, two representations, two methods, and the
+mandatory observed/reverse-time/cross-recording fits, they request 72
+1000-surrogate graph fits per arm (144 total):
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/run_empirical_null_controls.py \
+  --cases C,D --recordings F3T1,F3T2,F5T2 \
+  --representations rise,fall --methods cgc,cgc-star \
+  --n-null-replicates 0 --n-estimator-surrogates 1000 --alpha 0.05 \
+  --event-mode physical --seed 10 --resume \
+  --output-dir outputs/empirical_fdr_comparison/bh
+
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/run_empirical_null_controls.py \
+  --cases C,D --recordings F3T1,F3T2,F5T2 \
+  --representations rise,fall --methods cgc,cgc-star \
+  --n-null-replicates 0 --n-estimator-surrogates 1000 --alpha 0.05 \
+  --event-mode physical --seed 10 --no-fdr --resume \
+  --output-dir outputs/empirical_fdr_comparison/unadjusted
+```
+
+These are deliberately documented as heavy follow-up commands, not presented
+as completed evidence. The complete preview-first campaign, optional dependency
+setup, resume contract, and completion markers are documented in
+`notebooks/exec_order.md`.
+
+Summarize graph support, rise/fall overlap, and saved-artifact stability:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/analyze_graph_stability.py
+```
+
+This writes `outputs/graph_stability/graph_support_rows.csv`,
+`outputs/graph_stability/representation_overlaps.csv`,
+`outputs/graph_stability/graph_stability_summary.csv`, and
+`outputs/graph_stability/summary.json`.
+
+Generate empirical stability tables by re-estimating graphs under event
+bootstrap, time-window, leave-one-neuron, and leave-one-transient resampling:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/run_empirical_stability.py \
+  --methods cgc,cgc-star
+```
+
+This writes `outputs/empirical_stability/stability_rows.csv`,
+`outputs/empirical_stability/stability_summary.csv`, and
+`outputs/empirical_stability/summary.json`. Rows that cannot be estimated
+because a representation has too few windows, neurons, or transient segments
+are retained with `status="skipped"` and a skip reason. Use `--method cgc`
+for a single-method run.
+
+Build a file-based readiness report without running simulations:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/build_result_readiness_report.py
+```
+
+This writes `outputs/result_readiness/result_readiness_rows.csv`,
+`outputs/result_readiness/result_readiness_report.md`, and
+`outputs/result_readiness/summary.json`, flagging missing user-run publication
+gates separately from already saved support artifacts. Locked dynamic-A
+readiness requires `summary.json`, `representation_summary.csv`, and
+`rise_fall_contrasts.csv` from the locked output directory.
+
+Assemble manuscript-facing evidence tables and current figure drafts from saved
+outputs:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/build_manuscript_evidence_package.py
+```
+
+This writes interpretation CSVs, `manuscript_evidence_report.md`, a figure
+manifest, and current saved-table figures under
+`outputs/manuscript_evidence/`, including empirical metric, Chen-comparison,
+synthetic-tradeoff, representative Case C rise/fall network, graph-support,
+and evidence-gate draft panels. When user-run locked dynamic-A, empirical
+null-control, or empirical stability artifacts exist, the same command also
+writes dynamic-A, null-control, and stability interpretation tables and draft
+panels. The package also writes `manuscript_results_snippets.tex`, a
+saved-evidence-only LaTeX snippet that reports missing gates now and switches
+to result-summary prose after the user-run artifacts are present. Final figure
+assembly support is written to `final_figure_plan.csv` and
+`manuscript_figure_layout.tex`; when enough draft PNGs exist, the packager also
+builds `main_results_overview.png` as a composite starting point for final
+styling. It is a packaging step only; it does not run simulations or
+re-estimate empirical graphs.
+
+Audit the remaining `todo.md` user-run gates against saved outputs:
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/matplotlib-cache XDG_CACHE_HOME=/tmp/font-cache \
+  .venv/bin/python examples/build_todo_completion_audit.py
+```
+
+This writes `outputs/todo_completion/todo_completion_rows.csv`,
+`outputs/todo_completion/todo_completion_audit.md`, and
+`outputs/todo_completion/summary.json`. It is also file-based only: it checks
+whether the locked dynamic-A, null-control, stability, manuscript-evidence,
+and final-figure plan artifacts exist and contain data, but it does not
+generate those artifacts.
 
 Run a settings-free compatibility check on the supplied Fish 3 trace:
 
@@ -140,7 +421,7 @@ selecting parameters from observed network outputs:
 
 ```python
 from calcium_transient_rising_flank import (
-    CausalGranger,
+    CausalisedGC,
     SyntheticCondition,
     characterize_transients,
     run_synthetic_grid,
@@ -155,7 +436,7 @@ runs = run_synthetic_grid(
         SyntheticCondition(name="low_rate", gamma=0.8, downsample=2),
     ],
     seeds=range(20),
-    estimator_factory=lambda: CausalGranger(max_lag=1),
+    estimator_factory=lambda: CausalisedGC(max_lag=1),
 )
 calibration, locked_evaluation = split_calibration_evaluation(runs)
 ```
@@ -175,8 +456,8 @@ fig, axes = plot_topographic_pair(
 ```
 
 `cell_centers` must be an `(n_rois, 2)` array in image `(x, y)` coordinates,
-and `background` may be any grayscale or RGB NumPy image, including a later
-hindbrain background. With `mid` set, the plot keeps the manuscript bilateral
+and `background` may be any grayscale or RGB NumPy anatomical image. With
+`mid` set, the plot keeps the manuscript bilateral
 color convention: node fill reports signed within-side drive and edges are
 black within side or gray across sides. Set `edge_color="crimson"` to use the
 reference anatomical information-flow overlay style. For saved arrays, run:

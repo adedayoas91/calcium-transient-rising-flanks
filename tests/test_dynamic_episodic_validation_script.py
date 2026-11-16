@@ -1,0 +1,313 @@
+import importlib.util
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+import numpy as np
+
+
+def _load_script_module():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / ("dynamic_episodic_validation.py")
+    )
+    spec = importlib.util.spec_from_file_location("dynamic_episodic_validation", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class DynamicEpisodicValidationScriptTests(unittest.TestCase):
+    def test_parse_methods_accepts_combined_cgc_variants(self) -> None:
+        script = _load_script_module()
+
+        self.assertEqual(script._parse_methods("cgc,cgc-star"), ("cgc", "cgc-star"))
+
+        with self.assertRaises(ValueError):
+            script._parse_methods("cgc,unsupported")
+
+    def test_summary_and_contrast_rows_capture_representation_tradeoffs(self) -> None:
+        script = _load_script_module()
+        base = {
+            "method": "cgc-star",
+            "event_mode": "compressed",
+            "condition": "dynamic_a_noncausal_fall",
+            "simulator_mode": "episodic_dynamic",
+            "seed": 1,
+            "false_positive_rate": 0.2,
+            "orientation_accuracy": 0.8,
+            "edge_density": 0.3,
+            "truth_edges": 4,
+            "fall_propagated_total": 0.0,
+            "edge_presence_total": 5,
+            "edge_prevalence_mean": 0.75,
+            "edge_prevalence_max": 1.0,
+            "node_presence_total": 10,
+            "node_prevalence_mean": 1.0,
+            "active_union_nodes": 5,
+        }
+        rows = [
+            {
+                **base,
+                "representation": "rise",
+                "precision": 0.6,
+                "recall": 0.8,
+                "f1": 0.6857142857,
+            },
+            {
+                **base,
+                "representation": "fall",
+                "precision": 0.2,
+                "recall": 0.3,
+                "f1": 0.24,
+            },
+            {
+                **base,
+                "representation": "full",
+                "precision": 0.4,
+                "recall": 0.5,
+                "f1": 0.4444444444,
+            },
+            {
+                **base,
+                "representation": "fall_residual",
+                "precision": 0.3,
+                "recall": 0.4,
+                "f1": 0.3428571429,
+            },
+            {
+                **base,
+                "representation": "deconvolved",
+                "precision": 0.7,
+                "recall": 0.9,
+                "f1": 0.7875,
+            },
+        ]
+
+        summaries = script._summary_rows(rows)
+        contrasts = script._contrast_rows(summaries)
+
+        self.assertEqual(len(summaries), 5)
+        self.assertEqual(len(contrasts), 1)
+        self.assertTrue(all(row["method"] == "cgc-star" for row in summaries))
+        self.assertEqual(contrasts[0]["method"], "cgc-star")
+        self.assertAlmostEqual(contrasts[0]["rise_minus_fall_precision"], 0.4)
+        self.assertAlmostEqual(contrasts[0]["rise_minus_fall_residual_recall"], 0.4)
+        self.assertAlmostEqual(contrasts[0]["rise_minus_full_recall"], 0.3)
+        self.assertAlmostEqual(
+            contrasts[0]["rise_minus_deconvolved_f1"],
+            0.6857142857 - 0.7875,
+        )
+        self.assertEqual(contrasts[0]["rise_minus_fall_fall_propagated_total"], 0.0)
+
+    def test_dynamic_metadata_reports_topology_counts_and_prevalence(self) -> None:
+        script = _load_script_module()
+        episode = SimpleNamespace(
+            rise_length=20, fall_length=42, fall_start=20, fall_stop=62
+        )
+        run = SimpleNamespace(
+            dataset=SimpleNamespace(
+                episodes=(episode, episode),
+                propagated_events=np.zeros((3, 80)),
+                edge_presence_counts=np.array(
+                    [
+                        [0, 2, 0],
+                        [0, 0, 1],
+                        [0, 0, 0],
+                    ]
+                ),
+                edge_prevalence=np.array(
+                    [
+                        [0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.5],
+                        [0.0, 0.0, 0.0],
+                    ]
+                ),
+                node_presence_counts=np.array([2, 2, 1]),
+                node_prevalence=np.array([1.0, 1.0, 0.5]),
+            ),
+            condition=SimpleNamespace(
+                dynamic_config=SimpleNamespace(
+                    rise_waveform_length=20,
+                    fall_state_mode="stochastic_independent",
+                    fall_initial_scale=1.0,
+                    fall_initial_ceiling_fraction=1.0,
+                )
+            ),
+        )
+
+        metadata = script._dynamic_metadata(run)
+
+        self.assertEqual(metadata["n_episodes"], 2)
+        self.assertEqual(metadata["edge_presence_total"], 3)
+        self.assertAlmostEqual(metadata["edge_prevalence_mean"], 0.75)
+        self.assertAlmostEqual(metadata["edge_prevalence_max"], 1.0)
+        self.assertEqual(metadata["node_presence_total"], 5)
+        self.assertAlmostEqual(metadata["node_prevalence_mean"], 5 / 6)
+        self.assertEqual(metadata["active_union_nodes"], 3)
+
+    def test_rise_candidate_metadata_reports_retained_and_dropped_runs(self) -> None:
+        script = _load_script_module()
+        candidate = SimpleNamespace(
+            candidate_adjacency=np.array(
+                [
+                    [False, True, False],
+                    [False, False, False],
+                    [False, True, False],
+                ]
+            ),
+            matches=(object(), object(), object()),
+            support_counts=np.array(
+                [
+                    [0, 2, 0],
+                    [0, 0, 0],
+                    [0, 1, 0],
+                ]
+            ),
+            mean_overlap_fraction=np.array(
+                [
+                    [0.0, 0.75, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.5, 0.0],
+                ]
+            ),
+            event_indices=(np.arange(6), np.arange(5), np.arange(4)),
+            runs=SimpleNamespace(
+                kept_counts=np.array([2, 1, 1]),
+                dropped_counts=np.array([1, 0, 2]),
+                event_indices=(np.arange(4), np.arange(3), np.arange(2)),
+            ),
+        )
+        run = SimpleNamespace(
+            validation=SimpleNamespace(rise_flank_candidates=candidate)
+        )
+
+        metadata = script._rise_candidate_metadata(run, "rise")
+        fall_metadata = script._rise_candidate_metadata(run, "fall")
+
+        self.assertEqual(metadata["rise_candidate_edges"], 2)
+        self.assertEqual(metadata["rise_candidate_matches"], 3)
+        self.assertEqual(metadata["rise_candidate_retained_runs"], 4)
+        self.assertEqual(metadata["rise_candidate_dropped_runs"], 3)
+        self.assertEqual(metadata["rise_candidate_retained_frames"], 9)
+        self.assertEqual(metadata["rise_candidate_context_frames"], 15)
+        self.assertAlmostEqual(metadata["rise_candidate_mean_overlap"], 0.625)
+        self.assertIsNone(fall_metadata["rise_candidate_edges"])
+
+    def test_resume_completion_keeps_only_complete_simulation_units(self) -> None:
+        script = _load_script_module()
+
+        def row(seed: int, representation: str):
+            return {
+                "method": "cgc",
+                "event_mode": "compressed",
+                "condition": "dynamic_a_noncausal_fall",
+                "seed": seed,
+                "representation": representation,
+                "precision": 0.5,
+            }
+
+        rows = [
+            row(1, representation) for representation in script.REPRESENTATION_ORDER
+        ]
+        rows.extend([row(2, "full"), row(2, "rise")])
+
+        complete_rows = script._complete_grid_rows(rows)
+        completed_keys = script._completed_run_keys(rows)
+
+        self.assertEqual(len(complete_rows), len(script.REPRESENTATION_ORDER))
+        self.assertEqual(
+            [row["representation"] for row in complete_rows],
+            list(script.REPRESENTATION_ORDER),
+        )
+        self.assertEqual(
+            completed_keys,
+            {("cgc", "compressed", "dynamic_a_noncausal_fall", 1)},
+        )
+
+    def test_resume_signature_rejects_changed_run_settings(self) -> None:
+        script = _load_script_module()
+
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            script._write_resume_state(
+                output_dir,
+                config_signature={"n_steps": 240, "score_threshold": 0.1},
+                total_units=2,
+                completed_units=1,
+                status="running",
+            )
+
+            script._validate_resume_signature(
+                output_dir, {"n_steps": 240, "score_threshold": 0.1}
+            )
+            with self.assertRaises(ValueError):
+                script._validate_resume_signature(
+                    output_dir, {"n_steps": 480, "score_threshold": 0.1}
+                )
+
+    def test_incompatible_resume_can_restart_without_mixing_rows(self) -> None:
+        script = _load_script_module()
+
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "dynamic_episodic_locked"
+            output_dir.mkdir()
+            existing_signature = {
+                "max_lag": 1,
+                "tau": None,
+                "n_pasts": None,
+                "rise_match_max_lag": None,
+            }
+            requested_signature = {
+                "max_lag": 1,
+                "tau": 1,
+                "n_pasts": 3,
+                "rise_match_max_lag": 1,
+            }
+            script._write_resume_state(
+                output_dir,
+                config_signature=existing_signature,
+                total_units=160,
+                completed_units=87,
+                status="running",
+            )
+            (output_dir / script.GRID_RUNS_CSV).write_text("old rows\n")
+
+            archive = script._prepare_resume_output(
+                output_dir,
+                requested_signature,
+                restart_incompatible=True,
+            )
+
+            self.assertIsNotNone(archive)
+            self.assertTrue((archive / script.GRID_RUNS_CSV).is_file())
+            self.assertTrue((archive / script.RESUME_STATE_JSON).is_file())
+            self.assertEqual(list(output_dir.iterdir()), [])
+
+    def test_incompatible_resume_remains_strict_without_restart_flag(self) -> None:
+        script = _load_script_module()
+
+        with TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            script._write_resume_state(
+                output_dir,
+                config_signature={"n_pasts": None},
+                total_units=1,
+                completed_units=0,
+                status="running",
+            )
+
+            with self.assertRaises(ValueError):
+                script._prepare_resume_output(
+                    output_dir,
+                    {"n_pasts": 3},
+                    restart_incompatible=False,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()

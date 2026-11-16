@@ -1,0 +1,20 @@
+{
+  "frames_max": 1000,
+  "frames_min": 984,
+  "limitations": [
+    "The audit uses processed ROI traces, not raw movies.",
+    "Motion, neuropil contamination, and true sensor saturation are unavailable.",
+    "The original rationale for the three-recording legacy subset is unavailable.",
+    "No retrospective eligibility decision was assigned."
+  ],
+  "n_fish": 5,
+  "n_legacy_subset_recordings": 3,
+  "n_recordings": 9,
+  "recordings_with_artifact_annotation": 4,
+  "rois_after_exclusion_max": 20,
+  "rois_after_exclusion_min": 9,
+  "status": "complete",
+  "total_constant_rois": 0,
+  "total_excluded_rois": 22,
+  "total_nonfinite_values": 0
+}

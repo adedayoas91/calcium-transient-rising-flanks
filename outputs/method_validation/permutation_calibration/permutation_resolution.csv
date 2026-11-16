@@ -1,0 +1,4 @@
+alpha,current_count_resolves_first_rank,current_minimum_add_one_p,current_n_surrogates,first_rank_bh_cutoff,interpretation,minimum_surrogates_for_first_rank_resolution,n_rois,n_tests
+0.05,False,0.000999000999000999,1000,0.00045454545454545455,analytical probability-resolution bound; not an empirical stabilization estimate,2199,11,110
+0.05,False,0.000999000999000999,1000,0.0002747252747252747,analytical probability-resolution bound; not an empirical stabilization estimate,3639,14,182
+0.05,False,0.000999000999000999,1000,0.0001838235294117647,analytical probability-resolution bound; not an empirical stabilization estimate,5439,17,272

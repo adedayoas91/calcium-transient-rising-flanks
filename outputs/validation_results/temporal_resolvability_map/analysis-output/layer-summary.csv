@@ -1,0 +1,13 @@
+regime,signal_layer,metric,n_seeds,mean_across_grid,sd_across_seeds,ci95_low,ci95_high
+clean_homogeneous,native_latent_events,true_edge_coverage,20,1.0,0.0,1.0,1.0
+clean_homogeneous,native_latent_events,unconditional_direction_accuracy,20,1.0,0.0,1.0,1.0
+clean_homogeneous,native_latent_events,candidate_density,20,0.38750000000000007,5.695323946259567e-17,0.38750000000000007,0.38750000000000007
+clean_homogeneous,sampled_latent_events,true_edge_coverage,20,0.6895833333333333,0.03633673330301587,0.6739583333333333,0.7041666666666667
+clean_homogeneous,sampled_latent_events,unconditional_direction_accuracy,20,0.5510416666666667,0.04025855308491884,0.5333333333333334,0.5677083333333335
+clean_homogeneous,sampled_latent_events,candidate_density,20,0.3320833333333334,0.028594401595969432,0.3196354166666667,0.34401041666666665
+clean_homogeneous,sampled_noiseless_calcium,true_edge_coverage,20,1.0,0.0,1.0,1.0
+clean_homogeneous,sampled_noiseless_calcium,unconditional_direction_accuracy,20,0.87578125,0.013860018880047141,0.8700455729166665,0.8817708333333334
+clean_homogeneous,sampled_noiseless_calcium,candidate_density,20,0.4221614583333334,0.003692430140400722,0.42059895833333344,0.4236985677083334
+clean_homogeneous,sampled_noisy_fluorescence,true_edge_coverage,20,0.9970052083333332,0.004799987412226116,0.9949218749999998,0.9989583333333334
+clean_homogeneous,sampled_noisy_fluorescence,unconditional_direction_accuracy,20,0.8345052083333332,0.02151560645307248,0.8251302083333334,0.8433626302083334
+clean_homogeneous,sampled_noisy_fluorescence,candidate_density,20,0.4734635416666667,0.011336164658187044,0.4684895833333334,0.4781777343750001

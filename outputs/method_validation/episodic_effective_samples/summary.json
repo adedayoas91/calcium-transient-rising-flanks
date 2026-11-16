@@ -1,0 +1,29 @@
+{
+  "episodic_rise_headline": {
+    "compressed_ar1_effective_sample_proxy_pair_median_mean": 72.8923629550176,
+    "compressed_one_frame_lag_pair_fraction": 0.1260230320275957,
+    "compressed_same_segment_lag_pair_fraction": 0.06518102650244471,
+    "compressed_usable_samples_pair_median_mean": 376.625,
+    "physical_ar1_effective_sample_proxy_pair_median_mean": 8.212414784875314,
+    "physical_effective_sample_proxy_reduction_fraction": 0.8873350451000848,
+    "physical_usable_sample_reduction_fraction": 0.9261865250580816,
+    "physical_usable_samples_pair_median_mean": 27.8,
+    "selected_frames_in_declared_rise_phase_fraction": 0.060825450159875116,
+    "true_minus_nonedge_usable_samples_compressed": 3.65,
+    "true_minus_nonedge_usable_samples_physical": 4.275
+  },
+  "interpretation": "Usable lag-pair counts are exact for the implemented sampling rules. The AR(1)-adjusted quantity is a descriptive effective-sample proxy, not an exact count of independent observations.",
+  "n_pair_rows": 2400,
+  "n_recovery_rows": 480,
+  "n_sample_rows": 240,
+  "n_summary_rows": 24,
+  "outputs": [
+    "episodic_effective_sample_pair_rows.csv",
+    "episodic_effective_sample_rows.csv",
+    "episodic_effective_sample_recovery.csv",
+    "episodic_effective_sample_summary.csv",
+    "episodic_effective_sample_summary.png",
+    "episodic_effective_sample_summary.pdf"
+  ],
+  "status": "complete"
+}
