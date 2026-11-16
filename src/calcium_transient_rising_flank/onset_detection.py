@@ -19,7 +19,8 @@ _CHANGE_POINT_ASSUMPTIONS = (
 )
 _BAYESIAN_ASSUMPTIONS = (
     "Each onset is approximated by a non-negative rise-then-decay template.",
-    "Posterior mass is computed from deterministic Gaussian-style residual scores and a threshold-informed prior bonus.",
+    "Posterior mass is computed from deterministic Gaussian-style residual scores "
+    "and a threshold-informed prior bonus.",
 )
 
 
