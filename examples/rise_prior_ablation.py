@@ -536,7 +536,6 @@ def evaluate_gates(
     """Apply the prespecified feasibility thresholds to held-out results."""
 
     nonnull = [row for row in rows if not row["is_null"]]
-    null_rows = [row for row in rows if row["is_null"]]
     nonnull_contrasts = [
         row for row in contrasts if not str(row["condition"]).startswith("null_")
     ]
