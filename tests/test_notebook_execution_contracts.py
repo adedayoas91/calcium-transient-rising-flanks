@@ -206,7 +206,8 @@ def _notebook_key(path: Path) -> str:
 
 class NotebookExecutionContractTests(unittest.TestCase):
     def test_execution_guide_lists_every_notebook_in_canonical_order(self) -> None:
-        guide = (NOTEBOOK_ROOT / "exec_order.md").read_text(encoding="utf-8")
+        guide = (NOTEBOOK_ROOT.parent / "README.md").read_text(encoding="utf-8")
+        guide = guide.split("## Notebook execution order\n", 1)[1]
         positions = [guide.index(path) for path in CANONICAL_NOTEBOOK_ORDER]
         self.assertEqual(positions, sorted(positions))
 
@@ -528,7 +529,7 @@ class NotebookExecutionContractTests(unittest.TestCase):
 
     def test_baseline_environment_setup_reproduces_shared_environment(self) -> None:
         setup_command = "uv sync --frozen --all-extras"
-        documentation = (NOTEBOOK_ROOT / "exec_order.md").read_text()
+        documentation = (NOTEBOOK_ROOT.parent / "README.md").read_text()
         self.assertIn(setup_command, documentation)
         self.assertIn("uv run --no-sync", documentation)
         for relative_path in READY_TO_RUN_TOGGLES:
